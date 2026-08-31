@@ -1,0 +1,24 @@
+{
+  "name": "atrium",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "server": "node --no-warnings=ExperimentalWarning server/src/index.ts",
+    "bridge": "node bridge/src/cli.ts",
+    "probe": "node bridge/src/cli.ts probe",
+    "demo": "node --no-warnings=ExperimentalWarning scripts/demo.ts",
+    "test": "node scripts/tail-test.ts && node --no-warnings=ExperimentalWarning scripts/smoke.ts && node --no-warnings=ExperimentalWarning scripts/mcp-test.ts",
+    "test:tail": "node scripts/tail-test.ts",
+    "test:smoke": "node --no-warnings=ExperimentalWarning scripts/smoke.ts",
+    "test:mcp": "node --no-warnings=ExperimentalWarning scripts/mcp-test.ts",
+    "test:e2e": "node --no-warnings=ExperimentalWarning scripts/e2e.ts",
+    "deploy": "node --no-warnings=ExperimentalWarning scripts/deploy.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ws": "^8.21.3"
+  }
+}
