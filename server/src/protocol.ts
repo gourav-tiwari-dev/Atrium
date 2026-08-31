@@ -38,13 +38,15 @@ export interface Member {
   role: 'bridge' | 'viewer';
   /** true when this person's bridge was started with --allow-ask */
   canAsk: boolean;
+  /** true when they also allow a teammate's @mention to run their agent */
+  canMention: boolean;
   online: boolean;
   lastSeen: number;
 }
 
 /** browser or bridge -> server */
 export type ClientMessage =
-  | { t: 'hello'; room: string; token: string; name: string; agent?: string; role: 'bridge' | 'viewer'; canAsk?: boolean }
+  | { t: 'hello'; room: string; token: string; name: string; agent?: string; role: 'bridge' | 'viewer'; canAsk?: boolean; canMention?: boolean }
   | { t: 'turn'; kind: 'prompt' | 'response' | 'tool' | 'thinking'; text: string; tool?: string; ts?: number; id?: string; agent?: string }
   | { t: 'chat'; text: string }
   | { t: 'decision'; text: string }

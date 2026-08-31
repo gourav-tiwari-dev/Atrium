@@ -188,6 +188,9 @@ function join(): void {
   console.log(`  server  ${C.dim(url)}\n`);
 
   const allowAsk = has('--allow-ask');
+  // mentions imply asking: a teammate driving your agent is strictly more than
+  // you driving it yourself, so the narrower permission comes along for free.
+  const allowMentions = has('--allow-mentions');
   console.log(
     `  asking  ${
       allowAsk
@@ -195,6 +198,9 @@ function join(): void {
         : C.dim('off (--allow-ask lets the browser drive your agent)')
     }`,
   );
+  if (allowMentions) {
+    console.log(C.yellow('  mentions ON — a teammate @naming you starts a run on THIS machine'));
+  }
 
   let status: 'connecting' | 'open' | 'closed' = 'connecting';
   let runner: AgentRunner | null = null;
@@ -207,9 +213,10 @@ function join(): void {
     name,
     agent: 'mixed', // per-turn agent is what the UI actually displays
     codexSession: val('--codex-session'),
-    canAsk: allowAsk,
+    canAsk: allowAsk || allowMentions,
+    canMention: allowMentions,
     onRun: (from, text) => {
-      if (!allowAsk) return;
+      if (!allowAsk && !allowMentions) return;
       // Built on first use: which CLI to drive and which folder to run in are
       // learned from the transcripts, not guessed at startup.
       if (!runner) {
@@ -369,6 +376,7 @@ switch (cmd) {
           --all               print every turn, not just the last 25
           --seconds N         stop after N seconds
           --no-catch-up       ignore work done while the bridge was closed
+          --allow-mentions    let a teammate's @you run your agent (implies --allow-ask)
           --codex-session S   deliver mentions into a running Codex session
 
   While joined, Ctrl+P pauses streaming - nothing leaves the machine until you

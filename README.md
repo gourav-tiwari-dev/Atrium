@@ -143,12 +143,20 @@ and it answers without anyone re-typing anything.
 
 Type `@meera do X` (or `@meera-agent do X`) in the room.
 
-| target runs | what happens |
+| who you address | what happens |
 |---|---|
-| Codex | injected into the running session via `codex queue` — pass `--codex-session <name>` to the bridge |
-| Claude Code | no cross-machine injection exists, so it waits in `room_inbox` and their agent picks it up on its next read |
+| **yourself** (`@you`) | runs your own agent immediately — it is an ask by another name |
+| someone with `--allow-mentions` | runs their agent immediately |
+| someone without it | waits in their `room_inbox`; their agent sees it next time it reads the room |
+| someone with no bridge running | nothing can act on it |
 
-Either way the message is in the room and nothing is lost.
+In the last two cases the room now **says so in the People strip**. The first
+version filed the message and stayed quiet, so a mention nobody would ever act
+on looked exactly like one being worked on — two real messages sat unanswered
+before that was caught.
+
+`--allow-mentions` implies `--allow-ask`: letting a teammate drive your agent is
+strictly more than driving it yourself.
 
 ## Typing to your agent from the browser
 

@@ -18,6 +18,7 @@ interface Conn {
   agent: string | null;
   role: 'bridge' | 'viewer';
   canAsk: boolean;
+  canMention: boolean;
   alive: boolean;
 }
 
@@ -51,6 +52,7 @@ function members(room: string): Member[] {
         existing.role = 'bridge';
         existing.agent = c.agent;
         existing.canAsk = c.canAsk;
+        existing.canMention = c.canMention;
       }
       continue;
     }
@@ -59,6 +61,7 @@ function members(room: string): Member[] {
       agent: c.agent,
       role: c.role,
       canAsk: c.canAsk,
+      canMention: c.canMention,
       online: true,
       lastSeen: Date.now(),
     });
@@ -93,6 +96,7 @@ function onHello(ws: WebSocket, msg: Extract<ClientMessage, { t: 'hello' }>): Co
     agent: msg.agent ?? null,
     role: msg.role,
     canAsk: msg.role === 'bridge' && msg.canAsk === true,
+    canMention: msg.role === 'bridge' && msg.canMention === true,
     alive: true,
   };
   if (!rooms.has(room)) rooms.set(room, new Set());
@@ -189,13 +193,38 @@ function handleMessage(conn: Conn | null, ws: WebSocket, raw: string): Conn | nu
           target: msg.target,
         }),
       );
-      // Best-effort live delivery to that person's bridge. If their agent is a
-      // Claude session we cannot inject into it, so the mention waits in
-      // room_inbox until their agent next reads the room. See README.
-      for (const c of rooms.get(conn.room) ?? []) {
-        if (c.name === msg.target && c.role === 'bridge') {
-          send(c.ws, { t: 'deliver', from: conn.name, text: msg.text });
-        }
+      const bridges = [...(rooms.get(conn.room) ?? [])].filter(
+        (c) => c.name === msg.target && c.role === 'bridge',
+      );
+
+      // Addressing your own agent is just an ask by another name, so it runs.
+      // Addressing somebody else's runs only if they opted in with
+      // --allow-mentions, because it starts a real agent on their machine.
+      const own = msg.target === conn.name;
+      const willRun = bridges.filter((c) => (own ? c.canAsk : c.canMention));
+
+      for (const c of willRun) send(c.ws, { t: 'run', from: conn.name, text: msg.text });
+      for (const c of bridges) send(c.ws, { t: 'deliver', from: conn.name, text: msg.text });
+
+      // The old behaviour was to file it in room_inbox and say nothing, so a
+      // mention that nobody would ever act on looked identical to one being
+      // worked on. Never leave that ambiguous again.
+      if (willRun.length === 0) {
+        const why =
+          bridges.length === 0
+            ? `${msg.target} has no bridge running, so nothing will pick this up until they start one`
+            : own
+              ? `your bridge is not accepting prompts — restart it with --allow-ask`
+              : `waiting in ${msg.target}'s inbox; their agent sees it when it next reads the room, or they can allow live mentions with --allow-mentions`;
+        publish(
+          conn.room,
+          store.append(conn.room, {
+            ts: Date.now(),
+            member: conn.name,
+            kind: 'system',
+            text: why,
+          }),
+        );
       }
       return conn;
     }

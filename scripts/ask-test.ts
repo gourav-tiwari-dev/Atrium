@@ -113,6 +113,42 @@ async function main(): Promise<void> {
     await sleep(300);
     check("one person's ask never reaches another person's agent", opted.of('run').length === runsBefore);
 
+    // ---------- mentions: the thing that used to fail silently -----------
+    // meera's bridge (`opted`) has canAsk but NOT canMention.
+    const runsBeforeMention = opted.of('run').length;
+    meera.send({ t: 'mention', target: 'meera', text: 'my own agent, please run' });
+    await sleep(300);
+    check('@yourself runs your own agent', opted.of('run').length === runsBeforeMention + 1);
+
+    const runsBeforeCross = opted.of('run').length;
+    const evBefore = meera.events().length;
+    viewer.send({ t: 'mention', target: 'meera', text: 'someone else, no permission' });
+    await sleep(300);
+    check("@someone else does NOT run their agent by default", opted.of('run').length === runsBeforeCross);
+    const notice = meera.events().slice(evBefore).find((e) => e.kind === 'system');
+    check('and the room says so instead of failing silently', !!notice, notice?.text ?? '(silent — the old bug)');
+
+    // now a bridge that did opt in
+    const open = new Client();
+    await open.connect();
+    open.send({
+      t: 'hello', room: ROOM, token: TOKEN, name: 'arjun',
+      agent: 'claude', role: 'bridge', canAsk: true, canMention: true,
+    });
+    await sleep(250);
+    viewer.send({ t: 'mention', target: 'arjun', text: 'you allowed this' });
+    await sleep(300);
+    check('--allow-mentions lets a teammate run your agent', open.of('run').some((r) => r.text === 'you allowed this'));
+
+    const evBefore2 = viewer.events().length;
+    viewer.send({ t: 'mention', target: 'nobody-here', text: 'into the void' });
+    await sleep(300);
+    check(
+      'a mention at someone with no bridge is reported, not swallowed',
+      viewer.events().slice(evBefore2).some((e) => e.kind === 'system' && e.text.includes('no bridge')),
+    );
+
+    open.close();
     plain.close(); opted.close(); meera.close();
     await sleep(200);
 

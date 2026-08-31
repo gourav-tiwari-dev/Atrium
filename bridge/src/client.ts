@@ -23,6 +23,8 @@ export interface ClientOptions {
   codexSession?: string;
   /** tell the server this bridge will run prompts typed in the browser */
   canAsk?: boolean;
+  /** also let a teammate's @mention run this agent */
+  canMention?: boolean;
   onStatus?: (status: 'connecting' | 'open' | 'closed') => void;
   onDeliver?: (from: string, text: string) => void;
   /** the server asking us to run a prompt through the local agent */
@@ -77,6 +79,7 @@ export class RoomClient {
           agent: this.opts.agent,
           role: 'bridge',
           canAsk: this.opts.canAsk === true,
+          canMention: this.opts.canMention === true,
         }),
       );
       this.opts.onStatus?.('open');
