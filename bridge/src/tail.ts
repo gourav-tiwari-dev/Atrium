@@ -8,8 +8,11 @@ import { existsSync, statSync, createReadStream } from 'node:fs';
  *
  * Guarantees the parsers depend on:
  *  - a line is only emitted once it is terminated by \n, so no half-written JSON
- *  - the byte offset survives a reconnect, so restarts never replay old turns
  *  - truncation or rotation resets cleanly instead of emitting garbage
+ *  - `position` is the exact byte reached, so a caller can persist it and pass
+ *    it back as `startAt` next run. That is what carries work done while the
+ *    bridge was closed into the room instead of losing it; this class holds no
+ *    state across processes by itself.
  */
 export class Tailer {
   readonly file: string;
@@ -23,12 +26,19 @@ export class Tailer {
   constructor(
     file: string,
     onLine: (line: string) => void,
-    opts: { fromStart?: boolean; intervalMs?: number } = {},
+    opts: { fromStart?: boolean; startAt?: number; intervalMs?: number } = {},
   ) {
     this.file = file;
     this.onLine = onLine;
     this.intervalMs = opts.intervalMs ?? 250;
-    this.offset = opts.fromStart ? 0 : this.currentSize();
+
+    if (opts.startAt !== undefined) {
+      // Resuming a previous run. Clamp to the current size: if the file shrank
+      // it was rotated, and reading from a stale offset would emit garbage.
+      this.offset = Math.min(Math.max(opts.startAt, 0), this.currentSize());
+    } else {
+      this.offset = opts.fromStart ? 0 : this.currentSize();
+    }
   }
 
   private currentSize(): number {

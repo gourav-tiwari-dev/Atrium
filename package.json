@@ -10,13 +10,14 @@
     "bridge": "node bridge/src/cli.ts",
     "probe": "node bridge/src/cli.ts probe",
     "demo": "node --no-warnings=ExperimentalWarning scripts/demo.ts",
-    "test": "node scripts/tail-test.ts && node --no-warnings=ExperimentalWarning scripts/smoke.ts && node --no-warnings=ExperimentalWarning scripts/mcp-test.ts",
+    "test": "node scripts/tail-test.ts && node --no-warnings=ExperimentalWarning scripts/smoke.ts && node --no-warnings=ExperimentalWarning scripts/mcp-test.ts && node --no-warnings=ExperimentalWarning scripts/memory-test.ts",
     "test:tail": "node scripts/tail-test.ts",
     "test:smoke": "node --no-warnings=ExperimentalWarning scripts/smoke.ts",
     "test:mcp": "node --no-warnings=ExperimentalWarning scripts/mcp-test.ts",
     "test:e2e": "node --no-warnings=ExperimentalWarning scripts/e2e.ts",
     "deploy": "node --no-warnings=ExperimentalWarning scripts/deploy.ts",
-    "test:ask": "node --no-warnings=ExperimentalWarning scripts/ask-test.ts"
+    "test:ask": "node --no-warnings=ExperimentalWarning scripts/ask-test.ts",
+    "test:memory": "node --no-warnings=ExperimentalWarning scripts/memory-test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

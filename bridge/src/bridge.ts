@@ -13,6 +13,13 @@ export interface BridgeOptions {
   rescanMs?: number;
   /** replay a file from byte 0 instead of following from the end */
   fromStart?: boolean;
+  /**
+   * Where a previous run stopped, per file. Supplying this is what makes work
+   * done while the bridge was closed reach the room instead of vanishing.
+   */
+  resumeFrom?: (file: string) => number | undefined;
+  /** called with each tailer's current byte position, so a caller can persist it */
+  onProgress?: (file: string, offset: number) => void;
 }
 
 /**
@@ -43,6 +50,9 @@ export class Bridge {
   /** counters worth showing a human who is wondering whether this thing works */
   readonly stats = { lines: 0, turns: 0, dropped: 0, redacted: 0, private: 0 };
 
+  /** files that had unseen bytes from before this run - i.e. offline work */
+  readonly caughtUp: Array<{ file: string; bytes: number }> = [];
+
   private readonly onTurn: (turn: Turn, source: Source) => void;
 
   constructor(onTurn: (turn: Turn, source: Source) => void, opts: BridgeOptions = {}) {
@@ -52,6 +62,8 @@ export class Bridge {
       activeWithinMs: opts.activeWithinMs ?? 30 * 60 * 1000,
       rescanMs: opts.rescanMs ?? 5000,
       fromStart: opts.fromStart ?? false,
+      resumeFrom: opts.resumeFrom ?? (() => undefined),
+      onProgress: opts.onProgress ?? (() => {}),
     };
     this.ctx = { ...DEFAULT_PARSE_CONTEXT, includeThinking: this.opts.includeThinking };
   }
@@ -81,8 +93,14 @@ export class Bridge {
   stop(): void {
     if (this.rescanTimer) clearInterval(this.rescanTimer);
     this.rescanTimer = null;
+    this.reportProgress();
     for (const t of this.tailers.values()) t.stop();
     this.tailers.clear();
+  }
+
+  /** Hand every tailer's position to the caller so it can be persisted. */
+  reportProgress(): void {
+    for (const [file, tailer] of this.tailers) this.opts.onProgress(file, tailer.position);
   }
 
   /** Attach to any live session we are not already following. */
@@ -93,12 +111,16 @@ export class Bridge {
       // end. A file that shows up later is a session that just began (including
       // a headless run we launched ourselves), so read it from the top or its
       // opening turns are lost.
+      const resumeAt = this.opts.resumeFrom(source.file);
       const fromStart = this.opts.fromStart || this.started;
       const tailer = new Tailer(
         source.file,
         (line) => this.handleLine(line, source),
-        { fromStart },
+        resumeAt !== undefined ? { startAt: resumeAt } : { fromStart },
       );
+      if (resumeAt !== undefined && source.size > resumeAt) {
+        this.caughtUp.push({ file: source.file, bytes: source.size - resumeAt });
+      }
       this.tailers.set(source.file, tailer.start());
       this.onAttach?.(source);
     }

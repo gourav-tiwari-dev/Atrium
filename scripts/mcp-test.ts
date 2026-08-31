@@ -132,7 +132,11 @@ async function main(): Promise<void> {
 
     const tools = await client.request<{ tools: Array<{ name: string }> }>('tools/list');
     const names = tools.tools.map((t) => t.name).sort();
-    check('tools are advertised', names.join(',') === 'room_context,room_inbox,room_recent', names.join(','));
+    check(
+      'tools are advertised',
+      names.join(',') === 'room_context,room_digest,room_inbox,room_memory,room_recent,room_remember',
+      names.join(','),
+    );
 
     type ToolResult = { content: Array<{ type: string; text: string }>; isError?: boolean };
     const call = (name: string, args: unknown = {}) =>

@@ -123,6 +123,9 @@ and it answers without anyone re-typing anything.
 | `room_context` | the pinned decisions and who is in the room |
 | `room_recent` | what everyone else's agent recently said and ran |
 | `room_inbox` | messages other people addressed to this agent |
+| `room_memory` | the standing picture of the project |
+| `room_remember` | write something durable back into it |
+| `room_digest` | recent activity next to memory, to decide what to keep |
 
 ## Talking to someone else's agent
 
@@ -174,6 +177,47 @@ each other and is not acceptable for a room whose token has leaked. The prompt
 is passed to the CLI on stdin, never on a command line, so its contents cannot
 become shell commands.
 
+## Project memory — the part that isn't a feed
+
+An event log tells you what happened. It does not tell a new agent what the
+project *is*. Without that, an agent joining the room is a blank chatbot with a
+pile of transcript in front of it.
+
+So the room keeps two things, deliberately separate:
+
+| | what it holds | shape |
+|---|---|---|
+| **events** | what happened — every prompt, answer, tool call, message | append-only, grows forever |
+| **memory** | what the project *is* — architecture, why, who owns what, open questions | one entry per topic, overwritten in place |
+
+Memory is a page you can read, not a log you have to wade through. Anyone can
+add to it from the browser ("Project memory" tab), and **agents write to it
+themselves**:
+
+| tool | what the agent does with it |
+|---|---|
+| `room_memory` | read the project picture before starting anything |
+| `room_remember` | write back something durable it just settled, under a topic name |
+| `room_digest` | see recent activity next to memory, and decide what is worth keeping |
+
+`room_digest` deliberately returns recent activity rather than only what is
+newer than the last memory write. Filtering on that watermark meant somebody
+writing memory about older work pushed the mark past events nobody had ever
+summarised, and they were never offered again. It marks what is `NEW` instead.
+
+## Work you did with the bridge closed
+
+The bridge remembers how far through each transcript it got
+(`~/.atrium/offsets.json`) and resumes there next time. So an evening spent
+working alone with the room closed still reaches the team when you reconnect,
+instead of vanishing.
+
+Before this, every start jumped to the end of the file and everything in between
+was lost silently. Lane entries sort by when a turn actually happened, so caught
+-up work lands in its own place in the history rather than all at the bottom.
+
+`--no-catch-up` skips it if you would rather a session stayed private.
+
 ## Privacy
 
 The bridge broadcasts what your agent says, so this matters:
@@ -191,6 +235,7 @@ The bridge broadcasts what your agent says, so this matters:
 
 ```
 atrium join   --room R --token T [--name you] [--url ws://host/ws] [--allow-ask]
+              [--no-catch-up]     ignore work done while the bridge was closed
 atrium mcp    --room R --token T [--origin http://host] [--name you]
 atrium probe                      list every transcript on this machine
 atrium probe --live               follow sessions locally, send nothing
@@ -203,6 +248,7 @@ atrium probe --file <path>        parse one transcript end to end
 pnpm test:tail    # the tailer: appends, partial lines, truncation
 pnpm test:smoke   # the server protocol over real sockets
 pnpm test:mcp     # an agent told nothing can read the team's decisions
+pnpm test:memory  # project memory over ws and MCP, and offline catch-up
 pnpm test:ask     # browser -> your agent -> back into the room (calls the model once)
 pnpm test:e2e     # your real live session -> server -> another client
 pnpm demo         # a seeded room to look at
@@ -222,7 +268,9 @@ bridge/src/bridge.ts       discover -> tail -> parse -> redact -> emit
 bridge/src/tail.ts         follow a growing file without losing or repeating
 bridge/src/parse/claude.ts Claude Code transcript -> Turn
 bridge/src/parse/codex.ts  Codex rollout -> Turn
-bridge/src/mcp.ts          room_context / room_recent / room_inbox
+bridge/src/mcp.ts          room_context / room_recent / room_inbox / room_memory
+                           / room_remember / room_digest
+bridge/src/offsets.ts      how far through each transcript the last run got
 bridge/src/runner.ts       runs a browser-typed prompt through the local CLI
 web/dist/index.html        the whole UI, one file, no build
 ```

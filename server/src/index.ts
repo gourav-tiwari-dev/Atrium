@@ -105,6 +105,7 @@ function onHello(ws: WebSocket, msg: Extract<ClientMessage, { t: 'hello' }>): Co
     you: name,
     members: members(room),
     history: store.recent(room),
+    memory: store.memory(room),
   });
 
   // a second tab from the same person is not a new arrival
@@ -199,6 +200,22 @@ function handleMessage(conn: Conn | null, ws: WebSocket, raw: string): Conn | nu
       return conn;
     }
 
+    case 'remember': {
+      const key = msg.key.trim();
+      if (!key) {
+        send(conn.ws, { t: 'error', message: 'a memory topic needs a name' });
+        return conn;
+      }
+      store.remember(conn.room, key, msg.text, conn.name);
+      broadcast(conn.room, { t: 'memory', memory: store.memory(conn.room) });
+      return conn;
+    }
+
+    case 'forget':
+      store.forget(conn.room, msg.key);
+      broadcast(conn.room, { t: 'memory', memory: store.memory(conn.room) });
+      return conn;
+
     case 'notice':
       publish(
         conn.room,
@@ -276,7 +293,7 @@ function json(res: ServerResponse, code: number, body: unknown): void {
  * team decided.
  */
 function handleApi(url: string, query: URLSearchParams, res: ServerResponse): boolean {
-  const match = /^\/api\/room\/([^/]+)\/(context|recent|inbox)$/.exec(url);
+  const match = /^\/api\/room\/([^/]+)\/(context|recent|inbox|memory|digest)$/.exec(url);
   if (!match) return false;
 
   const room = decodeURIComponent(match[1]);
@@ -299,7 +316,31 @@ function handleApi(url: string, query: URLSearchParams, res: ServerResponse): bo
       room,
       members: members(room),
       decisions: store.decisions(room).map((d) => ({ text: d.text, by: d.member, ts: d.ts })),
+      memory: store.memory(room),
       recentCount: store.recent(room, 1).length,
+    });
+    return true;
+  }
+
+  if (what === 'memory') {
+    json(res, 200, { room, memory: store.memory(room) });
+    return true;
+  }
+
+  if (what === 'digest') {
+    // Raw material for turning the feed into memory.
+    //
+    // This deliberately does NOT filter to "since memory was last updated".
+    // Somebody writing memory about older activity would push that watermark
+    // past events nobody ever summarised, and they would never be offered
+    // again. So: always return recent activity, and report the watermark
+    // alongside it so the caller can see which part is new.
+    const watermark = store.memoryUpdatedAt(room);
+    json(res, 200, {
+      room,
+      memoryUpdatedAt: watermark,
+      memory: store.memory(room),
+      events: store.recent(room, limit),
     });
     return true;
   }
@@ -321,6 +362,63 @@ function handleApi(url: string, query: URLSearchParams, res: ServerResponse): bo
   return true;
 }
 
+/** Read the whole body of a small JSON POST. */
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (c: Buffer) => {
+      data += c.toString();
+      if (data.length > 200_000) reject(new Error('body too large'));
+    });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+/** POST /api/room/:room/remember  {key, text, by} - the MCP write path. */
+async function handleWrite(
+  req: IncomingMessage,
+  url: string,
+  query: URLSearchParams,
+  res: ServerResponse,
+): Promise<boolean> {
+  const match = /^\/api\/room\/([^/]+)\/(remember|forget)$/.exec(url);
+  if (!match || req.method !== 'POST') return false;
+
+  const room = decodeURIComponent(match[1]);
+  if (!store.roomExists(room)) {
+    json(res, 404, { error: 'no such room' });
+    return true;
+  }
+  if (!store.ensureRoom(room, query.get('token') ?? '')) {
+    json(res, 403, { error: 'wrong room token' });
+    return true;
+  }
+
+  let body: { key?: string; text?: string; by?: string };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    json(res, 400, { error: 'malformed json body' });
+    return true;
+  }
+
+  const key = (body.key ?? '').trim();
+  if (!key) {
+    json(res, 400, { error: 'key is required' });
+    return true;
+  }
+
+  if (match[2] === 'forget') {
+    store.forget(room, key);
+  } else {
+    store.remember(room, key, body.text ?? '', body.by ?? 'an agent');
+  }
+  broadcast(room, { t: 'memory', memory: store.memory(room) });
+  json(res, 200, { ok: true, memory: store.memory(room) });
+  return true;
+}
+
 async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const raw = req.url ?? '/';
   const url = raw.split('?')[0];
@@ -331,6 +429,7 @@ async function serveStatic(req: IncomingMessage, res: ServerResponse): Promise<v
     return;
   }
 
+  if (await handleWrite(req, url, query, res)) return;
   if (handleApi(url, query, res)) return;
 
   // normalize first, so ../ cannot climb out of the dist directory

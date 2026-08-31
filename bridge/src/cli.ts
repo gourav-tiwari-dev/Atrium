@@ -4,6 +4,7 @@ import { hostname, userInfo, homedir } from 'node:os';
 import { Bridge } from './bridge.ts';
 import { RoomClient } from './client.ts';
 import { AgentRunner, type AgentKind } from './runner.ts';
+import { openOffsets } from './offsets.ts';
 import { discover, activeSources, claudeRoot, codexRoot, type Source } from './discover.ts';
 import { unknownShapes } from './parse/codex.ts';
 import type { Turn } from './types.ts';
@@ -256,13 +257,25 @@ function join(): void {
   });
   client.connect();
 
-  const bridge = new Bridge(
-    (turn) => client.send(turn),
-    { includeThinking: has('--thinking') },
-  );
+  // Resuming from where the last run stopped is what carries work you did with
+  // the bridge closed into the room, instead of losing it.
+  const offsets = has('--no-catch-up') ? null : openOffsets(room, name);
+
+  const bridge = new Bridge((turn) => client.send(turn), {
+    includeThinking: has('--thinking'),
+    resumeFrom: offsets ? (file) => offsets.get(file) : undefined,
+    onProgress: offsets ? (file, at) => offsets.set(file, at) : undefined,
+  });
   bridgeRef = bridge;
   bridge.onAttach = (s) => console.log(`${C.green('  + streaming ')}${s.agent}  ${C.dim(basename(s.file))}`);
   bridge.start();
+
+  if (bridge.caughtUp.length > 0) {
+    const kb = Math.round(bridge.caughtUp.reduce((n, c) => n + c.bytes, 0) / 1024);
+    console.log(
+      C.cyan(`  ↺ catching up on ${kb} KB of work done while the bridge was closed`),
+    );
+  }
 
   // `atrium pause` is not a daemon command yet; the local toggle is Ctrl+P here
   if (process.stdin.isTTY) {
@@ -285,6 +298,8 @@ function join(): void {
   }
 
   const report = setInterval(() => {
+    bridge.reportProgress();
+    offsets?.save();
     const b = bridge.stats;
     const c = client.stats;
     const dot = status === 'open' ? C.green('●') : C.yellow('○');
@@ -297,6 +312,7 @@ function join(): void {
   function shutdown(): void {
     clearInterval(report);
     bridge.stop();
+    offsets?.save();
     runner?.dispose();
     client.close();
     console.log(C.bold(`\n\n  ${client.stats.sent} turns sent to ${room}.`));
@@ -352,6 +368,7 @@ switch (cmd) {
   flags   --thinking          include reasoning blocks (off: noisy, often private)
           --all               print every turn, not just the last 25
           --seconds N         stop after N seconds
+          --no-catch-up       ignore work done while the bridge was closed
           --codex-session S   deliver mentions into a running Codex session
 
   While joined, Ctrl+P pauses streaming - nothing leaves the machine until you

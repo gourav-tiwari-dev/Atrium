@@ -31,6 +31,13 @@ interface Decision {
   ts: number;
 }
 
+interface MemoryEntry {
+  key: string;
+  text: string;
+  updatedBy: string;
+  updatedAt: number;
+}
+
 interface RoomEventLite {
   ts: number;
   member: string;
@@ -47,6 +54,21 @@ function when(ts: number): string {
 
 export async function runMcpServer(opts: McpOptions): Promise<void> {
   const base = opts.origin.replace(/\/$/, '');
+
+  async function post<T>(path: string, body: unknown): Promise<T> {
+    const url = new URL(`${base}/api/room/${encodeURIComponent(opts.room)}/${path}`);
+    url.searchParams.set('token', opts.token);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(err.error ?? `room server returned ${res.status}`);
+    }
+    return (await res.json()) as T;
+  }
 
   async function api<T>(path: string, params: Record<string, string> = {}): Promise<T> {
     const url = new URL(`${base}/api/room/${encodeURIComponent(opts.room)}/${path}`);
@@ -71,9 +93,9 @@ export async function runMcpServer(opts: McpOptions): Promise<void> {
       {
         name: 'room_context',
         description:
-          'What the team has decided and who is in the room right now. Call this BEFORE answering ' +
-          'any question about project decisions, architecture or who owns what - it is the shared ' +
-          'context your user would otherwise have to re-type.',
+          'Who is in the room and what the team has decided. Call this BEFORE answering any ' +
+          'question about project decisions, architecture or who owns what. For the fuller ' +
+          'picture of what the project is and how it got here, also call room_memory.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       },
       {
@@ -91,6 +113,48 @@ export async function runMcpServer(opts: McpOptions): Promise<void> {
               description: "comma separated filter, e.g. 'prompt,response' or 'decision'",
             },
           },
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'room_memory',
+        description:
+          "The team's project memory: the accumulated understanding of what this project is, " +
+          'how it is built, and how it got here. This is the durable page, not the activity ' +
+          'feed. Read it at the start of any task so you are not starting from nothing.',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      },
+      {
+        name: 'room_remember',
+        description:
+          'Write or overwrite one topic of the project memory, so it survives past this ' +
+          "conversation and every teammate's agent can read it. Use it when something is " +
+          'settled and worth keeping: an architecture choice and why, what a lane owns, a ' +
+          'constraint that was discovered the hard way. Overwrite the same key to keep it ' +
+          'current rather than piling up near-duplicates.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            key: {
+              type: 'string',
+              description: "topic name, e.g. 'architecture', 'floor-control', 'lanes', 'open-questions'",
+            },
+            text: { type: 'string', description: 'the current understanding of that topic' },
+          },
+          required: ['key', 'text'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'room_digest',
+        description:
+          'Everything that has happened in the room since project memory was last updated, ' +
+          'alongside the memory itself. Use it to catch up after being away, and to decide ' +
+          'what is worth writing back with room_remember. This is how a raw activity feed ' +
+          'becomes something the next person can read.',
+        inputSchema: {
+          type: 'object',
+          properties: { limit: { type: 'number', description: 'max events (default 200)' } },
           additionalProperties: false,
         },
       },
@@ -148,6 +212,72 @@ export async function runMcpServer(opts: McpOptions): Promise<void> {
           return `[${when(e.ts)}] ${who} ${label}: ${text.slice(0, 400)}`;
         });
         return { content: [{ type: 'text', text: lines.join('\n') }] };
+      }
+
+      if (req.params.name === 'room_memory') {
+        const data = await api<{ memory: MemoryEntry[] }>('memory');
+        if (data.memory.length === 0) {
+          return {
+            content: [{
+              type: 'text',
+              text: 'Project memory is empty. If you learn something durable about this project, write it with room_remember.',
+            }],
+          };
+        }
+        const lines = data.memory.map(
+          (m) => `## ${m.key}\n${m.text}\n(last updated by ${m.updatedBy}, ${when(m.updatedAt)})`,
+        );
+        const rendered = `Project memory for ${opts.room}\n\n${lines.join('\n\n')}`;
+        return { content: [{ type: 'text', text: rendered }] };
+      }
+
+      if (req.params.name === 'room_remember') {
+        const key = String(args.key ?? '').trim();
+        const text = String(args.text ?? '').trim();
+        if (!key || !text) {
+          return { content: [{ type: 'text', text: 'Both key and text are required.' }], isError: true };
+        }
+        await post('remember', { key, text, by: opts.name });
+        return { content: [{ type: 'text', text: `Saved to project memory under "${key.toLowerCase()}". Everyone's agent can read it now.` }] };
+      }
+
+      if (req.params.name === 'room_digest') {
+        const limit = String(Math.min(Number(args.limit ?? 200) || 200, 400));
+        const data = await api<{
+          memoryUpdatedAt: number;
+          memory: MemoryEntry[];
+          events: RoomEventLite[];
+        }>('digest', { limit });
+
+        const parts: string[] = [];
+        parts.push(
+          data.memory.length === 0
+            ? 'Project memory is currently EMPTY.'
+            : `Project memory covers: ${data.memory.map((m) => m.key).join(', ')}`,
+        );
+
+        if (data.events.length === 0) {
+          parts.push('\nThe room has no activity yet.');
+        } else {
+          const mark = data.memoryUpdatedAt;
+          parts.push(
+            mark === 0
+              ? `\n${data.events.length} event(s). Memory has never been written, so all of this is uncovered:\n`
+              : `\n${data.events.length} event(s). Anything marked NEW happened after memory was last updated:\n`,
+          );
+          for (const e of data.events) {
+            const who = e.agent ? `${e.member}/${e.agent}` : e.member;
+            const label = e.kind === 'tool' ? `ran ${e.tool}` : e.kind;
+            const flag = mark > 0 && e.ts > mark ? 'NEW ' : '    ';
+            parts.push(
+              `${flag}[${when(e.ts)}] ${who} ${label}: ${e.text.replace(/\s+/g, ' ').trim().slice(0, 300)}`,
+            );
+          }
+          parts.push(
+            '\nIf any of this changes what the project IS - not just what happened - write it back with room_remember.',
+          );
+        }
+        return { content: [{ type: 'text', text: parts.join('\n') }] };
       }
 
       if (req.params.name === 'room_inbox') {

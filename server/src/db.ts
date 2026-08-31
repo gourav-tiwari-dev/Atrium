@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import type { RoomEvent, EventKind } from './protocol.ts';
+import type { RoomEvent, EventKind, MemoryEntry } from './protocol.ts';
 
 /**
  * One append-only event log per room, plus the room's shared secret.
@@ -34,6 +34,14 @@ export class Store {
         tool   TEXT,
         target TEXT,
         dedupe TEXT
+      );
+      CREATE TABLE IF NOT EXISTS memory (
+        room       TEXT    NOT NULL,
+        key        TEXT    NOT NULL,
+        text       TEXT    NOT NULL,
+        updated_by TEXT    NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (room, key)
       );
       CREATE INDEX IF NOT EXISTS events_room_seq ON events(room, seq);
       CREATE UNIQUE INDEX IF NOT EXISTS events_dedupe
@@ -128,6 +136,53 @@ export class Store {
          FROM events WHERE room = ? AND kind = 'decision' ORDER BY seq ASC`,
       )
       .all(room) as unknown as RoomEvent[];
+  }
+
+  /**
+   * Project memory: the curated understanding of the project, as opposed to
+   * `events`, which is only what happened. One row per topic, overwritten in
+   * place, so it stays a page you can read rather than a log that grows.
+   */
+  remember(room: string, key: string, text: string, by: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO memory (room, key, text, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(room, key) DO UPDATE SET
+           text = excluded.text, updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+      )
+      .run(room, key.trim().toLowerCase(), text, by, Date.now());
+  }
+
+  forget(room: string, key: string): void {
+    this.db.prepare('DELETE FROM memory WHERE room = ? AND key = ?').run(room, key.trim().toLowerCase());
+  }
+
+  memory(room: string): MemoryEntry[] {
+    return this.db
+      .prepare(
+        `SELECT key, text, updated_by AS updatedBy, updated_at AS updatedAt
+         FROM memory WHERE room = ? ORDER BY key ASC`,
+      )
+      .all(room) as unknown as MemoryEntry[];
+  }
+
+  /** When did anyone last curate memory? Backs "what has happened since". */
+  memoryUpdatedAt(room: string): number {
+    const row = this.db
+      .prepare('SELECT MAX(updated_at) AS t FROM memory WHERE room = ?')
+      .get(room) as { t: number | null } | undefined;
+    return row?.t ?? 0;
+  }
+
+  /** Events after a timestamp, oldest first - the raw material for a digest. */
+  since(room: string, ts: number, limit = 400): RoomEvent[] {
+    return this.db
+      .prepare(
+        `SELECT seq, ts, member, agent, kind, text, tool, target
+         FROM events WHERE room = ? AND ts > ? ORDER BY seq ASC LIMIT ?`,
+      )
+      .all(room, ts, limit) as unknown as RoomEvent[];
   }
 
   /** Mentions aimed at a member, newest first - backs the MCP room_inbox tool. */

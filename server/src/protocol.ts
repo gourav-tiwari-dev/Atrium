@@ -23,6 +23,14 @@ export interface RoomEvent {
   target: string | null;
 }
 
+/** One curated topic in the room's project memory. */
+export interface MemoryEntry {
+  key: string;
+  text: string;
+  updatedBy: string;
+  updatedAt: number;
+}
+
 export interface Member {
   name: string;
   agent: string | null;
@@ -45,11 +53,15 @@ export type ClientMessage =
   | { t: 'ask'; text: string }
   /** a bridge reporting something to the room, e.g. a failed agent run */
   | { t: 'notice'; text: string }
+  /** write or overwrite one topic of project memory */
+  | { t: 'remember'; key: string; text: string }
+  | { t: 'forget'; key: string }
   | { t: 'ping' };
 
 /** server -> browser or bridge */
 export type ServerMessage =
-  | { t: 'welcome'; room: string; you: string; members: Member[]; history: RoomEvent[] }
+  | { t: 'welcome'; room: string; you: string; members: Member[]; history: RoomEvent[]; memory: MemoryEntry[] }
+  | { t: 'memory'; memory: MemoryEntry[] }
   | { t: 'event'; event: RoomEvent }
   | { t: 'presence'; members: Member[] }
   | { t: 'deliver'; from: string; text: string }

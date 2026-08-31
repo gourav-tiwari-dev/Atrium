@@ -74,6 +74,19 @@ async function main(): Promise<void> {
   gourav.send(JSON.stringify({ t: 'decision', text: 'the coordinator owns floor control - no agent subscribes to "*"' }));
   gourav.send(JSON.stringify({ t: 'decision', text: 'BRIEF is one shared JSON object; six of the eleven requirements fall out of it' }));
   sockets.get('meera')!.send(JSON.stringify({ t: 'decision', text: 'lanes A/B/C/D frozen day one so nobody blocks' }));
+
+  const memory: Array<[string, string]> = [
+    ['what-this-is', 'A Coordinated AI Interview Panel on Agora: three AI interviewers in ONE rtc channel, plus a coordinator that decides who speaks.'],
+    ['floor-control', 'The hard part. If every agent subscribes to "*" they all fire the moment the candidate stops. One coordinator holds the floor and grants turns; agents subscribe only to the uids they were told to hear.'],
+    ['brief', 'BRIEF { claims[]{text,t,topic}, flags[]{vague|contradicts}, score{}, difficulty }. Built from the live transcript, read by every agent before its turn, rendered as the final assessment. Six of the eleven requirements fall out of it.'],
+    ['why-agora', 'Agora is the only stack that puts several agents in one channel with their own ids. Vapi and Retell are 1:1 call shaped and cannot do it. This is the pitch to the judges.'],
+    ['lanes', 'A realtime (channel, agent ids, barge-in). B coordinator (who speaks next) - gourav. C brief and analysis. D surface (candidate UI, recruiter report).'],
+    ['open-questions', 'Interrupt latency p50/p95 not measured yet. Nobody has rehearsed the stage demo end to end.'],
+  ];
+  for (const [key, text] of memory) {
+    gourav.send(JSON.stringify({ t: 'remember', key, text }));
+    await sleep(60);
+  }
   await sleep(200);
 
   let n = 0;
