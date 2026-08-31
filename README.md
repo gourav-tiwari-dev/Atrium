@@ -77,6 +77,18 @@ and survive restarts; the tunnel link is new each time.
 
 `pnpm server` alone runs it on localhost only.
 
+**About the link.** A Cloudflare quick tunnel is disposable: Cloudflare can
+retire the hostname with no warning, and `cloudflared` does not necessarily exit
+or log when it happens — the room keeps working on your machine and is gone for
+everyone else. `pnpm deploy` therefore health-checks the *public* URL every 30s
+and replaces a dead tunnel automatically, printing the new link and rewriting
+`JOIN.txt`. The room and token never change, so only the link has to be resent.
+
+That is good enough for a hackathon and it is not a real deployment: the room is
+only up while this machine is, and the link is new each time. For something the
+team can rely on for weeks, put the server on a host that stays up and give it a
+stable hostname.
+
 **Everyone — including the host — runs one command:**
 
 ```bash
