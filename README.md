@@ -59,15 +59,18 @@ pnpm install
 
 ## Run it
 
-**One person hosts the server.**
+**One person hosts the room and puts it on the internet:**
 
 ```bash
-pnpm server                      # http://localhost:8787
+pnpm deploy
 ```
 
-To let teammates on other networks in, expose that port
-(`cloudflared tunnel --url http://localhost:8787`, ngrok, or any small VPS) and
-give everyone the public URL.
+That starts the server, opens a Cloudflare quick tunnel in front of it (no
+account needed), and prints the link, room and token to send the team. It also
+writes them to `JOIN.txt`. The room and token are saved in `.atrium/room.json`
+and survive restarts; the tunnel link is new each time.
+
+`pnpm server` alone runs it on localhost only.
 
 **Everyone — including the host — runs one command:**
 
@@ -127,6 +130,40 @@ Type `@meera do X` (or `@meera-agent do X`) in the room.
 
 Either way the message is in the room and nothing is lost.
 
+## Typing to your agent from the browser
+
+You don't have to go back to the terminal to talk to your own AI. Each person's
+lane has an input box; whatever you type there runs through your agent, and the
+answer appears in the room for everyone, exactly like an interactive turn.
+
+It is **off by default**. Opt in when you start your bridge:
+
+```bash
+pnpm bridge join --room echosphere --token SECRET --name gourav --allow-ask
+```
+
+The reply is not captured by the runner. Both CLIs append the exchange to the
+transcript the bridge is already tailing, so the answer reaches the room the
+same way everything else does.
+
+| flag | what it does | default |
+|---|---|---|
+| `--allow-ask` | let the room run prompts through your agent | off |
+| `--ask-agent claude\|codex` | which CLI to drive | whichever spoke most recently |
+| `--ask-cwd <path>` | folder the agent runs in | the folder of the session being tailed |
+| `--ask-permission-mode <m>` | Claude Code permission mode | `auto` |
+| `--full-auto` | Codex: allow writes and commands instead of read-only | off |
+| `--fresh` | start a new conversation instead of continuing the last one | continues |
+
+**Read this before turning it on.** With `--allow-ask`, a prompt typed in the
+browser starts a real agent run on your machine, with whatever tool access the
+permission mode grants. The server only routes a prompt to the bridge whose
+`--name` matches the sender, but names are claimed, not proven — anyone holding
+the room token can claim yours. That is acceptable for four teammates who trust
+each other and is not acceptable for a room whose token has leaked. The prompt
+is passed to the CLI on stdin, never on a command line, so its contents cannot
+become shell commands.
+
 ## Privacy
 
 The bridge broadcasts what your agent says, so this matters:
@@ -143,7 +180,7 @@ The bridge broadcasts what your agent says, so this matters:
 ## Commands
 
 ```
-atrium join   --room R --token T [--name you] [--url ws://host/ws]
+atrium join   --room R --token T [--name you] [--url ws://host/ws] [--allow-ask]
 atrium mcp    --room R --token T [--origin http://host] [--name you]
 atrium probe                      list every transcript on this machine
 atrium probe --live               follow sessions locally, send nothing
@@ -156,6 +193,7 @@ atrium probe --file <path>        parse one transcript end to end
 pnpm test:tail    # the tailer: appends, partial lines, truncation
 pnpm test:smoke   # the server protocol over real sockets
 pnpm test:mcp     # an agent told nothing can read the team's decisions
+pnpm test:ask     # browser -> your agent -> back into the room (calls the model once)
 pnpm test:e2e     # your real live session -> server -> another client
 pnpm demo         # a seeded room to look at
 ```
@@ -175,6 +213,7 @@ bridge/src/tail.ts         follow a growing file without losing or repeating
 bridge/src/parse/claude.ts Claude Code transcript -> Turn
 bridge/src/parse/codex.ts  Codex rollout -> Turn
 bridge/src/mcp.ts          room_context / room_recent / room_inbox
+bridge/src/runner.ts       runs a browser-typed prompt through the local CLI
 web/dist/index.html        the whole UI, one file, no build
 ```
 
@@ -195,5 +234,6 @@ Both parsers were written against real transcripts, and both have a trap:
   since has passed; the cause was never pinned down, so the tailer has its own
   regression test (`test:tail`) to catch it if it is real.
 - No auth beyond the shared room token, by choice.
-#   A t r i u m  
+#   A t r i u m 
+ 
  

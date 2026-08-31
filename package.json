@@ -15,7 +15,8 @@
     "test:smoke": "node --no-warnings=ExperimentalWarning scripts/smoke.ts",
     "test:mcp": "node --no-warnings=ExperimentalWarning scripts/mcp-test.ts",
     "test:e2e": "node --no-warnings=ExperimentalWarning scripts/e2e.ts",
-    "deploy": "node --no-warnings=ExperimentalWarning scripts/deploy.ts"
+    "deploy": "node --no-warnings=ExperimentalWarning scripts/deploy.ts",
+    "test:ask": "node --no-warnings=ExperimentalWarning scripts/ask-test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

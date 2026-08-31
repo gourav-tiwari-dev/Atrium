@@ -186,7 +186,18 @@ function join(): void {
   console.log(`  as      ${C.bold(name)}`);
   console.log(`  server  ${C.dim(url)}\n`);
 
+  const allowAsk = has('--allow-ask');
+  console.log(
+    `  asking  ${
+      allowAsk
+        ? C.yellow('ON — the room can run prompts through your agent')
+        : C.dim('off (--allow-ask lets the browser drive your agent)')
+    }`,
+  );
+
   let status: 'connecting' | 'open' | 'closed' = 'connecting';
+  let runner: AgentRunner | null = null;
+  let bridgeRef: Bridge | null = null;
 
   const client = new RoomClient({
     url,
@@ -195,6 +206,32 @@ function join(): void {
     name,
     agent: 'mixed', // per-turn agent is what the UI actually displays
     codexSession: val('--codex-session'),
+    canAsk: allowAsk,
+    onRun: (from, text) => {
+      if (!allowAsk) return;
+      // Built on first use: which CLI to drive and which folder to run in are
+      // learned from the transcripts, not guessed at startup.
+      if (!runner) {
+        const agent = (val('--ask-agent') as AgentKind | undefined) ?? bridgeRef?.lastAgent ?? 'claude';
+        const cwd = val('--ask-cwd') ?? bridgeRef?.lastCwd ?? process.cwd();
+        console.log(C.dim(`\n  running asks through ${agent} in ${cwd}`));
+        runner = new AgentRunner({
+          agent,
+          cwd,
+          permissionMode: val('--ask-permission-mode') ?? 'auto',
+          fullAuto: has('--full-auto'),
+          continueSession: !has('--fresh'),
+          onNotice: (t) => {
+            console.log(C.yellow(`  ! agent run failed: ${t}`));
+            client.notice(`agent run failed: ${t}`);
+          },
+          onState: (busy) => {
+            if (busy) console.log(C.magenta(`\n  > ${from} asked your agent: `) + oneLine(text, 100));
+          },
+        });
+      }
+      runner.run(text);
+    },
     onStatus: (s) => {
       status = s;
       if (s === 'open') console.log(C.green('  ● connected'));

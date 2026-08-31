@@ -5,3 +5,6 @@ dist/
 .atrium/
 .env
 JOIN.txt
+*.sqlite-wal
+*.sqlite-shm
+*.log
