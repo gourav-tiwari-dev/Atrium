@@ -49,6 +49,11 @@ Both tools stream a JSONL transcript to disk in real time, so Atrium follows
 that instead. Race-free, vendor-neutral, catches tool calls too, and needs zero
 cooperation from the agent.
 
+## Team walkthrough
+
+A plain-language guide for people joining for the first time:
+<https://claude.ai/code/artifact/21c8fa0a-e9fb-4c54-94cc-9f4576ed6469>
+
 ## Requirements
 
 Node 24+ (TypeScript runs natively — there is no build step). That's it.
