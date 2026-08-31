@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
-import { hostname, userInfo } from 'node:os';
+import { basename, resolve } from 'node:path';
+import { hostname, userInfo, homedir } from 'node:os';
 import { Bridge } from './bridge.ts';
 import { RoomClient } from './client.ts';
 import { AgentRunner, type AgentKind } from './runner.ts';
@@ -215,6 +215,18 @@ function join(): void {
         const agent = (val('--ask-agent') as AgentKind | undefined) ?? bridgeRef?.lastAgent ?? 'claude';
         const cwd = val('--ask-cwd') ?? bridgeRef?.lastCwd ?? process.cwd();
         console.log(C.dim(`\n  running asks through ${agent} in ${cwd}`));
+
+        // Claude Code keeps its saved memory per working directory. Running an
+        // ask from the home folder loads whatever personal memory lives there,
+        // and the answer goes to the whole room. Worth saying out loud once.
+        if (agent === 'claude' && resolve(cwd) === resolve(homedir())) {
+          console.log(
+            C.yellow('  ! this is your home folder, so your personal saved memory is in scope'),
+          );
+          console.log(
+            C.dim('    answers go to everyone. Use --ask-cwd <project folder> to avoid it.'),
+          );
+        }
         runner = new AgentRunner({
           agent,
           cwd,

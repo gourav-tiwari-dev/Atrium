@@ -160,6 +160,11 @@ same way everything else does.
 | `--full-auto` | Codex: allow writes and commands instead of read-only | off |
 | `--fresh` | start a new conversation instead of continuing the last one | continues |
 
+**Your agent's own saved memory is in scope.** Claude Code keeps memory per
+working directory, so an ask that runs in a folder with saved memory can quote
+it — and the answer goes to the whole room. The bridge warns when the ask folder
+is your home directory; `--ask-cwd <project folder>` keeps it to the project.
+
 **Read this before turning it on.** With `--allow-ask`, a prompt typed in the
 browser starts a real agent run on your machine, with whatever tool access the
 permission mode grants. The server only routes a prompt to the bridge whose
