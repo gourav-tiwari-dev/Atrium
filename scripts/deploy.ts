@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { publishLobby } from '../bridge/src/rendezvous.ts';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const PORT = Number(process.env.PORT ?? 8787);
@@ -202,7 +203,6 @@ async function announce(publicUrl: string, cfg: RoomConfig): Promise<void> {
   }
   const wsUrl = `${publicUrl.replace(/^http/, 'ws')}/ws`;
   try {
-    const { publishLobby } = await import(join(ROOT, 'bridge', 'src', 'rendezvous.ts'));
     await publishLobby(base, cfg.room, wsUrl, secret);
     console.log(C.green(`  ● announced ${cfg.room} - "Join Atrium.cmd" will find it`));
   } catch (err) {

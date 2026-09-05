@@ -7,4 +7,4 @@ compatibility_date = "2026-09-05"
 # store. The secret is PUBLISH_SECRET, set with `wrangler secret put`.
 [[kv_namespaces]]
 binding = "LOBBIES"
-id = "REPLACE_WITH_THE_ID_WRANGLER_PRINTS"
+id = "5be26e1a349144fb8a13968eb4ff968c"
