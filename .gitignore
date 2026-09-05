@@ -14,3 +14,4 @@ JOIN.txt
 # The filled-in launcher carries the room token - the join credential.
 # Only the .template belongs in the repo.
 Join Atrium.cmd
+Join Atrium.command

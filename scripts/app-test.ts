@@ -14,7 +14,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { startApp } from '../bridge/src/app.ts';
+import { startApp, browserOpener } from '../bridge/src/app.ts';
 import { loadProfile } from '../bridge/src/profile.ts';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -65,6 +65,16 @@ async function waitHealthy(port: number): Promise<void> {
 
 async function main(): Promise<void> {
   console.log('\n  atrium app test\n');
+  // Opening the room is per-platform. Getting this wrong on a teammate's Mac
+  // means they connect and nothing appears, which reads as "it is broken".
+  const win = browserOpener('http://x/', 'win32');
+  check('windows uses start with an empty title',
+    win.cmd === 'cmd' && win.args.join('|') === '/c|start||http://x/', `${win.cmd} ${win.args.join(' ')}`);
+  const mac = browserOpener('http://x/', 'darwin');
+  check('mac uses open', mac.cmd === 'open' && mac.args[0] === 'http://x/', `${mac.cmd} ${mac.args.join(' ')}`);
+  const nix = browserOpener('http://x/', 'linux');
+  check('linux uses xdg-open', nix.cmd === 'xdg-open' && nix.args[0] === 'http://x/', `${nix.cmd} ${nix.args.join(' ')}`);
+
   const dir = mkdtempSync(join(tmpdir(), 'atrium-app-'));
   const portA = 8791;
   const portB = 8792;

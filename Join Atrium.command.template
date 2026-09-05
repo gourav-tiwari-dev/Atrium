@@ -1,0 +1,27 @@
+#!/bin/bash
+# Atrium launcher for macOS and Linux.
+# Double-click this file. First run only, it asks your name.
+cd "$(dirname "$0")" || exit 1
+
+if ! command -v node >/dev/null 2>&1; then
+  echo
+  echo "  Atrium needs Node.js 24 or newer."
+  echo "  Install it from https://nodejs.org and run this again."
+  echo
+  read -r -p "Press enter to close..."
+  exit 1
+fi
+
+# --- fill these two in before sharing this file -------------------------
+#   ATRIUM_RENDEZVOUS  the address npx wrangler deploy printed
+#   the --token value  from .atrium/room.json on the machine that deploys
+#
+#   This file carries the room token, which is the join credential. Share it
+#   the way you would share the old join command, and no more widely.
+# -----------------------------------------------------------------------
+export ATRIUM_RENDEZVOUS=https://atrium-lobby.REPLACE.workers.dev
+
+node --no-warnings=ExperimentalWarning "bridge/src/cli.ts" app --lobby echosphere --token REPLACE_WITH_ROOM_TOKEN
+
+echo
+read -r -p "Press enter to close..."

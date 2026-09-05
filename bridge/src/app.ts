@@ -48,12 +48,24 @@ export function pageFor(wsUrl: string, lobby: string, token: string): string {
   return `${http}/?room=${encodeURIComponent(lobby)}&token=${encodeURIComponent(token)}`;
 }
 
-export function openInBrowser(url: string): void {
-  // `start ""` is what opens the default browser on Windows. The empty title
-  // argument is required, or start swallows the URL as the window title.
-  const child = spawn('cmd', ['/c', 'start', '', url], { stdio: 'ignore', detached: true });
+/** The command that opens a URL in the default browser, per platform. */
+export function browserOpener(url: string, platform = process.platform): { cmd: string; args: string[] } {
+  if (platform === 'win32') {
+    // `start ""` needs the empty title argument, or start swallows the URL as
+    // the window title and opens nothing.
+    return { cmd: 'cmd', args: ['/c', 'start', '', url] };
+  }
+  if (platform === 'darwin') return { cmd: 'open', args: [url] };
+  return { cmd: 'xdg-open', args: [url] };
+}
+
+export function openInBrowser(url: string, onFail?: (why: string) => void): void {
+  const { cmd, args } = browserOpener(url);
+  const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
   child.on('error', () => {
-    /* no shell association: the URL was printed too, so this is not fatal */
+    // Do not swallow this. The room still works - the URL was printed - but
+    // someone staring at a window that did not open deserves to be told why.
+    onFail?.(`could not open your browser (${cmd}); open the link above yourself`);
   });
   child.unref();
 }

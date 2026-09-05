@@ -235,7 +235,7 @@ async function app(): Promise<void> {
         rl.close();
         return answer;
       },
-      openBrowser: openInBrowser,
+      openBrowser: (u) => openInBrowser(u, (why) => console.log(`  ${C.yellow(why)}`)),
       onLine: (text) => console.log(`  ${C.dim(text)}`),
     });
   } catch (err) {
