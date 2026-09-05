@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atrium</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #141a22;
+    --panel-2: #1a222c;
+    --line: #232c38;
+    --text: #d8e0ea;
+    --muted: #7d8b9c;
+    --faint: #4d5a6a;
+    --accent: #58a6ff;
+    --prompt: #3fb950;
+    --response: #58a6ff;
+    --tool: #6e7b8b;
+    --decision: #d29922;
+    --mention: #bc8cff;
+    --danger: #f85149;
+    --radius: 8px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f8fa; --panel: #fff; --panel-2: #f0f3f6; --line: #d6dde5;
+      --text: #1f2933; --muted: #5b6875; --faint: #8b97a4;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 13px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ---------- top bar ---------- */
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 9px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel); flex: none;
+  }
+  .brand { font-weight: 650; letter-spacing: .3px; }
+  .brand span { color: var(--muted); font-weight: 400; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot.on { background: var(--prompt); }
+  .dot.off { background: var(--danger); }
+  .members { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .pickup {
+    margin: 8px 10px 0; padding: 9px 11px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-left: 3px solid var(--decision); border-radius: 6px;
+  }
+  .pickup-head { font-size: 12.5px; font-weight: 600; }
+  .pickup-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .pickup-cmd {
+    display: block; margin-top: 7px; padding: 6px 8px;
+    background: var(--bg); border: 1px solid var(--line); border-radius: 4px;
+    font-family: var(--mono); font-size: 11.5px;
+    /* click selects the whole command - a tunnelled page may have no clipboard */
+    user-select: all; overflow-x: auto; white-space: nowrap;
+  }
+  .pill {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 99px; padding: 3px 9px; font-size: 11.5px;
+  }
+  .pill b { font-weight: 600; }
+  .pill .badge { color: var(--faint); font-family: var(--mono); font-size: 10px; }
+
+  /* ---------- layout ---------- */
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  .decisions {
+    flex: none; background: var(--panel); border-bottom: 1px solid var(--line);
+    max-height: 34vh; display: flex; flex-direction: column;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 8px; padding: 7px 14px;
+    font-size: 10.5px; letter-spacing: .9px; text-transform: uppercase;
+    color: var(--muted); font-weight: 600; flex: none;
+  }
+  .panel-head .count { color: var(--faint); font-weight: 400; letter-spacing: 0; text-transform: none; }
+  .decisions ul { margin: 0; padding: 0 14px 10px; list-style: none; overflow-y: auto; }
+  .decisions li {
+    padding: 5px 0 5px 14px; position: relative; line-height: 1.45;
+    border-left: 2px solid var(--decision); margin-bottom: 4px; padding-left: 10px;
+  }
+  .decisions li .who { color: var(--faint); font-size: 11px; margin-left: 6px; }
+  .empty { color: var(--faint); padding: 0 14px 12px; font-style: italic; }
+
+  /* tabs: decisions are choices, memory is the standing picture of the project */
+  .tabs { display: flex; gap: 2px; }
+  .tab {
+    background: none; border: 0; border-bottom: 2px solid transparent;
+    color: var(--faint); font: inherit; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .9px; text-transform: uppercase; padding: 2px 2px 4px;
+    cursor: pointer; border-radius: 0;
+  }
+  .tab:hover { color: var(--muted); border-color: var(--line); }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  .tab .n { color: var(--faint); font-weight: 400; letter-spacing: 0; margin-left: 5px; }
+
+  .memlist { margin: 0; padding: 0 14px 10px; list-style: none; overflow-y: auto; }
+  .memlist li {
+    padding: 6px 0 7px 10px; border-left: 2px solid var(--accent);
+    margin-bottom: 5px; line-height: 1.45;
+  }
+  .memlist .k {
+    font-family: var(--mono); font-size: 10.5px; color: var(--accent);
+    text-transform: uppercase; letter-spacing: .6px; display: block; margin-bottom: 2px;
+  }
+  .memlist .body { white-space: pre-wrap; }
+  .memlist .who { color: var(--faint); font-size: 11px; }
+
+  .lanes { flex: 1; display: flex; gap: 1px; background: var(--line); min-height: 0; overflow-x: auto; }
+  .lane {
+    flex: 1 1 0; min-width: 260px; background: var(--bg);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .lane-head {
+    display: flex; align-items: center; gap: 7px; padding: 8px 12px;
+    border-bottom: 1px solid var(--line); background: var(--panel); flex: none;
+  }
+  .lane-head b { font-size: 12.5px; }
+  .lane-head .agent {
+    font-family: var(--mono); font-size: 10px; color: var(--faint);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+  .lane-body { flex: 1; overflow-y: auto; padding: 8px 12px 14px; }
+
+  .turn { margin-bottom: 9px; line-height: 1.5; word-break: break-word; }
+  .turn .meta {
+    font-family: var(--mono); font-size: 10px; color: var(--faint);
+    display: flex; gap: 7px; margin-bottom: 2px;
+  }
+  .turn .kind { font-weight: 600; }
+  .turn.prompt   .kind { color: var(--prompt); }
+  .turn.response .kind { color: var(--response); }
+  .turn.tool     .kind { color: var(--tool); }
+  .turn.thinking .kind { color: var(--mention); }
+  .turn.prompt .text {
+    background: var(--panel-2); border-left: 2px solid var(--prompt);
+    padding: 5px 8px; border-radius: 0 var(--radius) var(--radius) 0;
+  }
+  .turn.tool .text {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    white-space: pre-wrap; overflow: hidden; text-overflow: ellipsis;
+    max-height: 2.8em;
+  }
+  .turn .text { white-space: pre-wrap; }
+  .turn.system { color: var(--faint); font-style: italic; font-size: 11.5px; }
+  .turn.system .text { color: var(--danger); font-style: normal; }
+
+  /* the ask box lives in your own lane, and is one element that gets MOVED
+     between renders - never rebuilt - so typing survives incoming events */
+  .ask { flex: none; border-top: 1px solid var(--line); padding: 8px 10px; display: flex; gap: 7px; }
+  .ask input { flex: 1; padding: 7px 10px; font-size: 12.5px; }
+  .ask button { padding: 7px 12px; font-size: 12px; }
+  .ask.off { display: block; color: var(--faint); font-size: 11.5px; line-height: 1.5; }
+  .ask.off code { font-family: var(--mono); color: var(--muted); }
+  .ask .busy { color: var(--decision); font-size: 11.5px; align-self: center; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--danger); color: var(--text);
+    padding: 10px 16px; border-radius: var(--radius); font-size: 12.5px;
+    max-width: 560px; z-index: 30; box-shadow: 0 8px 30px rgba(0,0,0,.4);
+  }
+
+  /* ---------- humans ---------- */
+  .humans {
+    flex: none; height: 27vh; border-top: 1px solid var(--line);
+    background: var(--panel); display: flex; flex-direction: column;
+  }
+  .chat { flex: 1; overflow-y: auto; padding: 4px 14px 8px; }
+  .msg { margin-bottom: 6px; line-height: 1.5; }
+  .msg .who { font-weight: 650; margin-right: 7px; }
+  .msg.mention { color: var(--mention); }
+  .msg.mention .target { font-family: var(--mono); font-size: 11.5px; }
+  .msg .at { color: var(--faint); font-family: var(--mono); font-size: 10px; margin-right: 7px; }
+
+  .composer { display: flex; gap: 8px; padding: 9px 14px; border-top: 1px solid var(--line); flex: none; }
+  input[type=text] {
+    flex: 1; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 8px 11px; font: inherit; outline: none;
+  }
+  input[type=text]:focus { border-color: var(--accent); }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 8px 14px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06131f; font-weight: 600; }
+  button.primary:hover { opacity: .9; color: #06131f; }
+
+  /* ---------- join gate ---------- */
+  .gate {
+    position: fixed; inset: 0; background: var(--bg);
+    display: grid; place-items: center; z-index: 20;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 26px 28px; width: 340px;
+  }
+  .card h1 { margin: 0 0 4px; font-size: 19px; letter-spacing: .3px; }
+  .card p { margin: 0 0 18px; color: var(--muted); line-height: 1.5; }
+  .card label { display: block; font-size: 11px; color: var(--muted); margin: 11px 0 4px; }
+  .card input { width: 100%; }
+  .card button { width: 100%; margin-top: 18px; }
+  .err { color: var(--danger); margin-top: 10px; min-height: 16px; font-size: 12px; }
+  .hint { color: var(--faint); font-size: 11px; margin-top: 12px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="gate" id="gate">
+  <div class="card">
+    <h1>Atrium</h1>
+    <p>A live room for people and their agents.</p>
+    <label for="f-name">Your name</label>
+    <input type="text" id="f-name" autocomplete="off" placeholder="gourav" />
+    <label for="f-room">Room</label>
+    <input type="text" id="f-room" autocomplete="off" placeholder="echosphere" />
+    <label for="f-token">Room token</label>
+    <input type="text" id="f-token" autocomplete="off" placeholder="shared secret" />
+    <button class="primary" id="f-join">Join</button>
+    <div class="err" id="f-err"></div>
+    <div class="hint">
+      Everyone uses the same room and token. Run
+      <code>atrium join</code> in a terminal to stream your agent in.
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<header>
+  <div class="brand">atrium <span id="room-name"></span></div>
+  <span class="dot off" id="conn"></span>
+  <span style="color:var(--muted);font-size:11.5px" id="conn-text">offline</span>
+  <div class="members" id="members"></div>
+</header>
+
+<main>
+  <section class="decisions">
+    <div class="panel-head">
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" id="tab-dec" aria-selected="true">Decisions<span class="n" id="dec-count"></span></button>
+        <button class="tab" role="tab" id="tab-mem" aria-selected="false">Project memory<span class="n" id="mem-count"></span></button>
+      </div>
+      <button style="margin-left:auto;padding:3px 9px;font-size:11px" id="panel-add">pin a decision</button>
+    </div>
+
+    <ul id="dec-list"></ul>
+    <div class="empty" id="dec-empty">Nothing pinned yet. Pin what the team settles on — every agent can read it.</div>
+
+    <ul class="memlist" id="mem-list" hidden></ul>
+    <div class="empty" id="mem-empty" hidden>
+      Empty. This is the standing picture of the project — what it is, how it's built, how you got here.
+      Your agent can write to it with <code>room_remember</code>, or add a note here.
+    </div>
+  </section>
+
+  <section class="lanes" id="lanes"></section>
+
+  <section class="humans">
+    <div class="panel-head">People</div>
+    <div class="chat" id="chat"></div>
+    <div class="composer">
+      <input type="text" id="say" placeholder="Talk to the room, or @name to address someone's agent" autocomplete="off" />
+      <button class="primary" id="send">Send</button>
+    </div>
+  </section>
+</main>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get: (k, d) => { try { return localStorage.getItem('atrium.' + k) ?? d; } catch { return d; } },
+    set: (k, v) => { try { localStorage.setItem('atrium.' + k, v); } catch { /* private mode */ } },
+  };
+
+  const state = {
+    me: '', room: '', token: '',
+    members: [], events: [],
+    memory: [],      // the standing picture of the project, not the feed
+    tab: 'dec',      // which of the two top panels is showing
+    ws: null, backoff: 500,
+  };
+
+  // ---------------------------------------------------------------- render
+
+  const KINDS = { prompt: 1, response: 1, tool: 1, thinking: 1, system: 1 };
+  const time = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  /**
+   * Built once and MOVED into your lane on every render. Rebuilding it would
+   * wipe half-typed text every time somebody else's agent said something.
+   */
+  var askBox = null, askInput = null, askBtn = null, askBusy = false;
+
+  function buildAskBox() {
+    var box = el('div', 'ask');
+    var input = el('input');
+    input.type = 'text';
+    input.placeholder = 'Ask your agent…';
+    input.autocomplete = 'off';
+    var btn = el('button', 'primary', 'Ask');
+    box.append(input, btn);
+
+    function fire() {
+      var text = input.value.trim();
+      if (!text || askBusy) return;
+      send({ t: 'ask', text: text });
+      input.value = '';
+      setAskBusy(true);
+      // the answer arrives as a normal turn; this only guards double-sends
+      setTimeout(function () { setAskBusy(false); }, 4000);
+    }
+    btn.addEventListener('click', fire);
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') fire(); });
+
+    askInput = input;
+    askBtn = btn;
+    return box;
+  }
+
+  function setAskBusy(v) {
+    askBusy = v;
+    if (askBtn) {
+      askBtn.textContent = v ? 'sent…' : 'Ask';
+      askBtn.disabled = v;
+    }
+  }
+
+  /** Your lane gets the input; if your bridge did not opt in, it says so. */
+  function askElementFor(member) {
+    if (member && member.canAsk) {
+      if (!askBox) askBox = buildAskBox();
+      return askBox;
+    }
+    var off = el('div', 'ask off');
+    off.append(document.createTextNode('To type to your agent from here, restart your bridge with '));
+    off.append(el('code', null, '--allow-ask'));
+    return off;
+  }
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function renderMembers() {
+    const box = $('members');
+    box.replaceChildren();
+    for (const m of state.members) {
+      const pill = el('div', 'pill');
+      pill.append(el('span', 'dot on'));
+      pill.append(el('b', null, m.name));
+      pill.append(el('span', 'badge', m.role === 'bridge' ? (m.agent || 'agent') : 'viewing'));
+      box.append(pill);
+    }
+  }
+
+  function renderMemory() {
+    var list = $('mem-list');
+    list.replaceChildren();
+    $('mem-count').textContent = state.memory.length ? String(state.memory.length) : '';
+    var showing = state.tab === 'mem';
+    $('mem-empty').hidden = !showing || state.memory.length > 0;
+    list.hidden = !showing;
+    if (!showing) return;
+    for (var i = 0; i < state.memory.length; i++) {
+      var m = state.memory[i];
+      var li = el('li');
+      li.append(el('span', 'k', m.key));
+      li.append(el('div', 'body', m.text));
+      li.append(el('div', 'who', 'updated by ' + m.updatedBy + ' · ' + time(m.updatedAt)));
+      list.append(li);
+    }
+  }
+
+  function setTab(which) {
+    state.tab = which;
+    if (!$('tab-dec')) return;
+    $('tab-dec').setAttribute('aria-selected', which === 'dec' ? 'true' : 'false');
+    $('tab-mem').setAttribute('aria-selected', which === 'mem' ? 'true' : 'false');
+    $('panel-add').textContent = which === 'dec' ? 'pin a decision' : 'add a note';
+    renderDecisions();
+    renderMemory();
+  }
+
+  function renderDecisions() {
+    const list = $('dec-list');
+    const decisions = state.events.filter((e) => e.kind === 'decision');
+    list.replaceChildren();
+    var showing = state.tab === 'dec';
+    list.hidden = !showing;
+    $('dec-empty').style.display = showing && decisions.length === 0 ? 'block' : 'none';
+    $('dec-count').textContent = decisions.length ? String(decisions.length) : '';
+    if (!showing) return;
+    for (const d of decisions) {
+      const li = el('li');
+      li.append(document.createTextNode(d.text));
+      li.append(el('span', 'who', '— ' + d.member));
+      list.append(li);
+    }
+    list.scrollTop = list.scrollHeight;
+  }
+
+  /** One column per person who has actually streamed a turn. */
+  function renderLanes() {
+    const byMember = new Map();
+    for (const e of state.events) {
+      if (!KINDS[e.kind]) continue;
+      if (!byMember.has(e.member)) byMember.set(e.member, []);
+      byMember.get(e.member).push(e);
+    }
+    // Sort by when the turn happened, not when the server saw it. Work that a
+    // bridge caught up on after being closed arrives late but belongs in its
+    // own place in the history.
+    for (const list of byMember.values()) list.sort((a, b) => a.ts - b.ts);
+
+    // keep a lane for every present member, even before their first turn
+    for (const m of state.members) if (!byMember.has(m.name)) byMember.set(m.name, []);
+
+    const lanes = $('lanes');
+    const names = [...byMember.keys()].sort();
+    if (names.length === 0) {
+      lanes.replaceChildren(
+        Object.assign(el('div', 'empty', 'No agent is streaming yet. Run: atrium join --room ' + state.room), {
+          style: 'padding:20px 14px',
+        }),
+      );
+      return;
+    }
+
+    // remember which lanes were scrolled to the bottom, so new turns follow
+    const atBottom = new Map();
+    for (const body of lanes.querySelectorAll('.lane-body')) {
+      atBottom.set(body.dataset.member, body.scrollHeight - body.scrollTop - body.clientHeight < 40);
+    }
+
+    lanes.replaceChildren();
+    for (const name of names) {
+      const turns = byMember.get(name);
+      const member = state.members.find((m) => m.name === name);
+      const lane = el('div', 'lane');
+
+      const head = el('div', 'lane-head');
+      head.append(el('span', 'dot ' + (member ? 'on' : 'off')));
+      head.append(el('b', null, name + (name === state.me ? ' (you)' : '')));
+      const agent = turns.length ? turns[turns.length - 1].agent : member && member.agent;
+      if (agent && agent !== 'mixed') head.append(el('span', 'agent', agent));
+      lane.append(head);
+
+      // The room's messages went into this person's session, but a terminal
+      // they already had open never saw them - a running agent does not notice
+      // appends made behind its back. So hand over the exact command instead of
+      // hoping they work it out.
+      if (name === state.me && member && member.pickup) {
+        const n = member.pickup.count;
+        const p = el('div', 'pickup');
+        p.append(el('div', 'pickup-head',
+          n + (n === 1 ? ' room message went' : ' room messages went') + ' into your session.'));
+        p.append(el('div', 'pickup-sub', "A terminal you already have open won't have them."));
+        p.append(el('code', 'pickup-cmd', member.pickup.command));
+        lane.append(p);
+      }
+
+      const body = el('div', 'lane-body');
+      body.dataset.member = name;
+      for (const t of turns.slice(-120)) {
+        const turn = el('div', 'turn ' + t.kind);
+        const meta = el('div', 'meta');
+        meta.append(el('span', 'kind', t.kind === 'tool' ? (t.tool || 'tool') : t.kind));
+        meta.append(el('span', null, time(t.ts)));
+        turn.append(meta);
+        turn.append(el('div', 'text', t.text));
+        body.append(turn);
+      }
+      lane.append(body);
+      if (name === state.me) {
+        var hadFocus = askInput && document.activeElement === askInput;
+        lane.append(askElementFor(state.members.find(function (m) { return m.name === state.me; })));
+        if (hadFocus && askInput) askInput.focus();
+      }
+      lanes.append(lane);
+    }
+
+    for (const body of lanes.querySelectorAll('.lane-body')) {
+      if (atBottom.get(body.dataset.member) !== false) body.scrollTop = body.scrollHeight;
+    }
+  }
+
+  function renderChat() {
+    const chat = $('chat');
+    const stick = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 40;
+    chat.replaceChildren();
+    for (const e of state.events) {
+      if (e.kind === 'chat') {
+        const m = el('div', 'msg');
+        m.append(el('span', 'at', time(e.ts)));
+        m.append(el('span', 'who', e.member));
+        m.append(document.createTextNode(e.text));
+        chat.append(m);
+      } else if (e.kind === 'mention') {
+        const m = el('div', 'msg mention');
+        m.append(el('span', 'at', time(e.ts)));
+        m.append(el('span', 'who', e.member));
+        m.append(el('span', 'target', '@' + e.target + '-agent '));
+        m.append(document.createTextNode(e.text));
+        chat.append(m);
+      } else if (e.kind === 'join' || e.kind === 'leave') {
+        const m = el('div', 'msg');
+        m.append(el('span', 'at', time(e.ts)));
+        m.append(el('span', 'turn system', e.member + ' ' + (e.kind === 'join' ? 'joined' : 'left')));
+        chat.append(m);
+      }
+    }
+    if (stick) chat.scrollTop = chat.scrollHeight;
+  }
+
+  function renderAll() {
+    setTab(state.tab);
+    renderLanes();
+    renderChat();
+  }
+
+  var toastTimer = null;
+  function toast(text) {
+    var t = $('toast');
+    t.textContent = text;
+    t.hidden = false;
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 6000);
+  }
+
+  function setConn(on, text) {
+    $('conn').className = 'dot ' + (on ? 'on' : 'off');
+    $('conn-text').textContent = text;
+  }
+
+  // ------------------------------------------------------------- socket
+
+  function send(msg) {
+    if (state.ws && state.ws.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(msg));
+  }
+
+  function connect() {
+    setConn(false, 'connecting…');
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(proto + '://' + location.host + '/ws');
+    state.ws = ws;
+
+    ws.addEventListener('open', () => {
+      state.backoff = 500;
+      send({ t: 'hello', room: state.room, token: state.token, name: state.me, role: 'viewer' });
+    });
+
+    ws.addEventListener('message', (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.t === 'welcome') {
+        setConn(true, 'live');
+        state.events = msg.history;
+        state.members = msg.members;
+        state.memory = msg.memory || [];
+        $('room-name').textContent = '/ ' + msg.room;
+        $('gate').style.display = 'none';
+        renderMembers();
+        renderAll();
+      } else if (msg.t === 'event') {
+        state.events.push(msg.event);
+        if (state.events.length > 2000) state.events.splice(0, 500);
+        renderAll();
+      } else if (msg.t === 'memory') {
+        state.memory = msg.memory || [];
+        renderMemory();
+      } else if (msg.t === 'presence') {
+        state.members = msg.members;
+        renderMembers();
+        renderLanes();
+      } else if (msg.t === 'error') {
+        if ($('gate').style.display === 'none') {
+          // already in the room: this is an action that failed, not a bad login
+          toast(msg.message);
+          setAskBusy(false);
+        } else {
+          $('f-err').textContent = msg.message;
+          $('gate').style.display = 'grid';
+          setConn(false, 'refused');
+        }
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      setConn(false, 'reconnecting…');
+      setTimeout(connect, state.backoff);
+      state.backoff = Math.min(state.backoff * 2, 15000);
+    });
+  }
+
+  // --------------------------------------------------------------- input
+
+  function say() {
+    const input = $('say');
+    const text = input.value.trim();
+    if (!text) return;
+    // both "@meera ..." and "@meera-agent ..." address meera's agent. The name
+    // class has to allow '-', so strip the suffix after matching rather than
+    // trying to express it in the pattern.
+    const at = /^@([\w.-]+)\s+([\s\S]+)$/.exec(text);
+    const isMember = (n) => state.members.some((m) => m.name === n);
+    let target = null;
+    if (at) {
+      if (isMember(at[1])) target = at[1];
+      else if (isMember(at[1].replace(/-agent$/, ''))) target = at[1].replace(/-agent$/, '');
+    }
+    if (target) send({ t: 'mention', target: target, text: at[2] });
+    else send({ t: 'chat', text });
+    input.value = '';
+  }
+
+  $('send').addEventListener('click', say);
+  $('say').addEventListener('keydown', (e) => { if (e.key === 'Enter') say(); });
+
+  $('panel-add').addEventListener('click', () => {
+    if (state.tab === 'dec') {
+      var text = prompt('What did the team decide?');
+      if (text && text.trim()) send({ t: 'decision', text: text.trim() });
+      return;
+    }
+    var key = prompt('Topic name (e.g. architecture, lanes, open-questions):');
+    if (!key || !key.trim()) return;
+    var body = prompt('What should everyone’s agent know about "' + key.trim() + '"?');
+    if (body && body.trim()) send({ t: 'remember', key: key.trim(), text: body.trim() });
+  });
+
+  $('tab-dec').addEventListener('click', function () { setTab('dec'); });
+  $('tab-mem').addEventListener('click', function () { setTab('mem'); });
+
+  $('f-join').addEventListener('click', () => {
+    state.me = $('f-name').value.trim();
+    state.room = $('f-room').value.trim();
+    state.token = $('f-token').value.trim();
+    if (!state.me || !state.room || !state.token) {
+      $('f-err').textContent = 'All three fields are required.';
+      return;
+    }
+    $('f-err').textContent = '';
+    store.set('name', state.me);
+    store.set('room', state.room);
+    store.set('token', state.token);
+    connect();
+  });
+
+  // A link can carry the room and token, so the host can hand out one URL that
+  // just works. The name is still the person's own.
+  var params = new URLSearchParams(location.search);
+  if (params.get('tab') === 'mem') state.tab = 'mem';
+  for (const [id, key, fallback] of [['f-name', 'name', ''], ['f-room', 'room', 'atrium'], ['f-token', 'token', '']]) {
+    $(id).value = params.get(key) || store.get(key, fallback);
+    $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter') $('f-join').click(); });
+  }
+
+  // a returning teammate should not have to re-type anything
+  if ($('f-name').value && $('f-room').value && $('f-token').value) $('f-join').click();
+})();
+</script>
+</body>
+</html>

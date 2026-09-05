@@ -1,5 +1,7 @@
 node_modules/
-dist/
+# NOT dist/ - web/dist/index.html is hand-written source, not build output.
+# This project has no build step, and that one file is the entire front end.
+# Ignoring it kept the whole UI out of the repo and off every teammate's clone.
 *.sqlite
 *.sqlite-journal
 .atrium/
