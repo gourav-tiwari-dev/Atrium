@@ -1,0 +1,26 @@
+@echo off
+title Atrium
+cd /d "%~dp0"
+
+where node >nul 2>nul || (
+  echo.
+  echo   Atrium needs Node.js 24 or newer.
+  echo   Install it from https://nodejs.org and run this again.
+  echo.
+  pause
+  exit /b 1
+)
+
+rem --- fill these two in before sharing this file -------------------------
+rem   ATRIUM_RENDEZVOUS  the address npx wrangler deploy printed
+rem   the --token value  from .atrium/room.json on the machine that deploys
+rem
+rem   This file carries the room token, which is the join credential. Share it
+rem   the way you would share the old join command, and no more widely.
+rem -----------------------------------------------------------------------
+set ATRIUM_RENDEZVOUS=https://atrium-lobby.REPLACE.workers.dev
+
+node --no-warnings=ExperimentalWarning "bridge\src\cli.ts" app --lobby echosphere --token REPLACE_WITH_ROOM_TOKEN
+
+echo.
+pause

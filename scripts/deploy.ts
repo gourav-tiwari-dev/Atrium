@@ -185,6 +185,34 @@ async function publicHealthy(url: string): Promise<boolean> {
   }
 }
 
+/**
+ * Tell the rendezvous where the room is now.
+ *
+ * This is what stops teammates being re-issued a join command every deploy -
+ * the tunnel hostname changes, this call is what makes that invisible to them.
+ * The supervisor calls raise() again when it replaces a dead tunnel, so a
+ * replacement is announced exactly the same way the first one is.
+ */
+async function announce(publicUrl: string, cfg: RoomConfig): Promise<void> {
+  const base = process.env.ATRIUM_RENDEZVOUS ?? '';
+  const secret = process.env.ATRIUM_PUBLISH_SECRET ?? '';
+  if (!base || !secret) {
+    console.log(C.dim('  (no rendezvous configured - teammates need the link above)'));
+    return;
+  }
+  const wsUrl = `${publicUrl.replace(/^http/, 'ws')}/ws`;
+  try {
+    const { publishLobby } = await import(join(ROOT, 'bridge', 'src', 'rendezvous.ts'));
+    await publishLobby(base, cfg.room, wsUrl, secret);
+    console.log(C.green(`  ● announced ${cfg.room} - "Join Atrium.cmd" will find it`));
+  } catch (err) {
+    // A room that is up but unannounced is recoverable. A deploy that dies
+    // because a Worker was unreachable is not.
+    console.log(C.yellow(`  ! could not announce the room: ${(err as Error).message}`));
+    console.log(C.dim('    the room is running; share the link above until this is fixed'));
+  }
+}
+
 async function main(): Promise<void> {
   const cfg = loadOrCreateRoom();
 
@@ -225,6 +253,7 @@ async function main(): Promise<void> {
       tunnel = started.proc;
       url = started.url;
       banner(url, cfg, attempt);
+      await announce(url, cfg);
       attempt++;
     } catch (err) {
       console.error(C.red(`\n  could not start cloudflared: ${(err as Error).message}`));

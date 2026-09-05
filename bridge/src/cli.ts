@@ -288,6 +288,10 @@ switch (cmd) {
   ${C.bold('join')} --room <room> --token <token> [--name you] [--url ws://host/ws]
         stream this machine's agent turns into the room
 
+  ${C.bold('app')}  [--lobby <name>]
+        what "Join Atrium.cmd" runs: look the lobby up, join it, open the room.
+        Asks your name once. Never needs a url - it re-looks-up when the room moves.
+
   ${C.bold('mcp')}  --room <room> --token <token> [--origin http://host]
         expose the room to your agent as MCP tools (room_context, room_recent, room_inbox)
 
