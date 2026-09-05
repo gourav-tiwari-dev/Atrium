@@ -46,10 +46,18 @@ export interface RunnerOptions {
   owner: string;
   memberCount: () => number;
   /**
-   * codex only: deliver into the RUNNING app session with `codex queue` instead
-   * of spawning `codex exec resume`. `codex queue` is verified to work locally
-   * on Windows without --remote; whether it reaches a live Codex Desktop session
-   * is the one open question in the spec, so this stays off until confirmed.
+   * codex only: deliver into the RUNNING app session with `codex queue` rather
+   * than spawning `codex exec resume`.
+   *
+   * ON by default, because `exec resume` appends to the thread behind the app's
+   * back and a running process never re-reads its own transcript - so the room
+   * got the answer and the teammate's Codex window showed nothing at all. That
+   * is the same "a live process does not see outside appends" finding that
+   * shaped the Claude side; Codex Desktop is just another running process.
+   *
+   * Verified 2026-09-05 on a teammate's Mac: a queued line appeared in the open
+   * Codex app on its own. If a queue ever fails, the run falls through to
+   * `exec resume` so the room still gets an answer.
    */
   codexLiveQueue: boolean;
   onSessionCreated: (sessionId: string) => void;

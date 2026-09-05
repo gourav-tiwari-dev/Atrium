@@ -175,7 +175,7 @@ function join(): void {
     askCwd: val('--ask-cwd'),
     permissionMode: val('--ask-permission-mode'),
     fullAuto: has('--full-auto'),
-    codexLiveQueue: has('--codex-live-queue'),
+    codexLiveQueue: !has('--codex-headless'),
     session: val('--session'),
     catchUp: !has('--no-catch-up'),
     thinking: has('--thinking'),
@@ -308,7 +308,8 @@ switch (cmd) {
           --no-catch-up       ignore work done while the bridge was closed
           --allow-mentions    let a teammate's @you run your agent (implies --allow-ask)
           --session <uuid>    pin a specific conversation instead of the saved one
-          --codex-live-queue  codex: deliver into the running app session
+          --codex-headless    codex: answer in a background process instead of
+                              delivering into your open Codex app
 
   The room talks to ONE pinned conversation per person, saved in
   ~/.atrium/session.json. If you have never started one, the first message from

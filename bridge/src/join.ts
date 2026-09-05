@@ -138,7 +138,8 @@ export function joinRoom(cfg: JoinConfig): JoinHandle {
           room: cfg.room,
           owner: cfg.name,
           memberCount: () => client.memberCount,
-          codexLiveQueue: cfg.codexLiveQueue === true,
+          // On unless explicitly disabled - see RunnerOptions for why.
+          codexLiveQueue: cfg.codexLiveQueue !== false,
           onSessionCreated: (id) => {
             pins.set({ agent, sessionId: id, cwd, pinnedAt: Date.now() });
             say(C.green(`\n  ● this room is now pinned to session ${id}`));

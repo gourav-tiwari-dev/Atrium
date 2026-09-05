@@ -357,9 +357,16 @@ real file counts, not a smoke check.
 
 ## Open questions
 
-1. Does `codex queue` reach a live Codex Desktop session? Decides whether Sahil
-   and romit get **live** delivery into their running app, or pinned-resume
-   delivery like Claude users. Both satisfy the requirement; only the feel differs.
+1. ~~Does `codex queue` reach a live Codex Desktop session?~~ **Closed
+   2026-09-05 — yes.** Verified on a teammate's Mac: a queued line appeared in
+   the open Codex app on its own. It is now the default for Codex, with
+   `codex exec resume` as the fallback if a queue fails.
+
+   The bug that forced the test is worth recording: `exec resume` appends to the
+   thread behind the app's back, and a running process never re-reads its own
+   transcript - so a teammate's mention was answered into the room while their
+   Codex window showed nothing at all. That is the same finding that shaped the
+   Claude side; Codex Desktop is just another running process.
 2. ~~Does the Codex app write to `~/.codex/sessions`?~~ **Closed 2026-09-05** —
    yes, and the existing parser reads them unchanged. See *Verified later the
    same day*.
