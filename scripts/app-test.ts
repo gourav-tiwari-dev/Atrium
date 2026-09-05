@@ -94,6 +94,7 @@ async function main(): Promise<void> {
     openBrowser: (u) => opened.push(u),
     onLine: () => {},
     maxReconnectsBeforeReresolve: 2,
+    registerMcpServer: false,  // never touch this machine's real agent config
   });
   await sleep(1500);
 
@@ -118,6 +119,7 @@ async function main(): Promise<void> {
     openBrowser: (u) => opened.push(u),
     onLine: () => {},
     maxReconnectsBeforeReresolve: 2,
+    registerMcpServer: false,  // never touch this machine's real agent config
   });
   await sleep(1500);
   check('a second run asks nothing', asked.length === 0, JSON.stringify(asked));

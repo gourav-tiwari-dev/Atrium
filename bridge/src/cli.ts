@@ -273,12 +273,15 @@ switch (cmd) {
     break;
   case 'mcp': {
     // stdio belongs to the MCP protocol here, so nothing may be printed
-    const origin = val('--origin') ?? 'http://localhost:8787';
-    const room = val('--room') ?? 'atrium';
+    const rendezvous = val('--rendezvous') ?? process.env.ATRIUM_RENDEZVOUS ?? '';
+    // --origin still works, but a registration that outlives one deploy should
+    // resolve the address rather than remember it.
+    const origin = val('--origin') ?? (rendezvous ? undefined : 'http://localhost:8787');
+    const room = val('--room') ?? val('--lobby') ?? 'atrium';
     const token = val('--token') ?? process.env.ATRIUM_TOKEN ?? '';
     const name = val('--name') ?? (userInfo().username || hostname());
     const { runMcpServer } = await import('./mcp.ts');
-    await runMcpServer({ origin, room, token, name });
+    await runMcpServer({ origin, rendezvous: rendezvous || undefined, room, token, name });
     break;
   }
   default:

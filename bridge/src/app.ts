@@ -1,4 +1,6 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { cliCommand, detectAgent } from './launch.ts';
 import { joinRoom, type JoinHandle } from './join.ts';
 import { resolveLobby } from './rendezvous.ts';
 import { loadProfile, saveProfile, type Profile } from './profile.ts';
@@ -33,6 +35,12 @@ export interface AppOptions {
   onLine: (text: string) => void;
   /** consecutive drops before going back to the rendezvous */
   maxReconnectsBeforeReresolve?: number;
+  /**
+   * Register Atrium as an MCP server for this machine's agent. Default true.
+   * Tests turn it off - otherwise every run would rewrite the real Claude or
+   * Codex config on this machine with throwaway lobby and token values.
+   */
+  registerMcpServer?: boolean;
 }
 
 export interface AppHandle {
@@ -68,6 +76,47 @@ export function openInBrowser(url: string, onFail?: (why: string) => void): void
     onFail?.(`could not open your browser (${cmd}); open the link above yourself`);
   });
   child.unref();
+}
+
+/**
+ * Register Atrium as an MCP server for whichever agent CLI this person uses.
+ *
+ * The room already exposes decisions and project memory through `room_context`
+ * and `room_memory` - but reaching them needed a `claude mcp add …` line nobody
+ * on the team ever ran, so in practice no agent could read what the team had
+ * decided. Doing it here means nobody has to know the command exists.
+ *
+ * It registers against the RENDEZVOUS, not a room address: a registration
+ * outlives many deploys, and a baked-in tunnel hostname would be wrong by the
+ * next morning, silently. Remove-then-add so an older stale entry is replaced.
+ *
+ * Failure is not fatal. The room works; the agent just cannot read it.
+ */
+function registerMcp(
+  agent: 'claude' | 'codex',
+  opts: AppOptions,
+  name: string,
+): { ok: boolean; detail: string } {
+  const { cmd, prefix } = cliCommand(agent);
+  const cliPath = fileURLToPath(new URL('./cli.ts', import.meta.url));
+  const run = (args: string[]) =>
+    spawnSync(cmd, [...prefix, ...args], { timeout: 30_000, shell: false, encoding: 'utf8' });
+
+  run(['mcp', 'remove', 'atrium']); // may not exist; that is fine
+
+  const r = run([
+    'mcp', 'add', 'atrium', '--',
+    process.execPath, '--no-warnings=ExperimentalWarning', cliPath, 'mcp',
+    '--lobby', opts.lobby,
+    '--token', opts.token,
+    '--rendezvous', opts.rendezvous,
+    '--name', name,
+  ]);
+  if (r.error) return { ok: false, detail: String((r.error as NodeJS.ErrnoException).code ?? r.error) };
+  if (r.status !== 0) {
+    return { ok: false, detail: `${(r.stderr ?? '').trim().split('\n').slice(-1)[0] ?? ''}`.slice(0, 120) };
+  }
+  return { ok: true, detail: '' };
 }
 
 export async function startApp(opts: AppOptions): Promise<AppHandle> {
@@ -157,6 +206,17 @@ export async function startApp(opts: AppOptions): Promise<AppHandle> {
         }
       },
     });
+  }
+
+  // Give this person's agent read access to the room's decisions and memory.
+  // Once per launch, so it self-heals if a config was edited or the CLI changed.
+  if (opts.registerMcpServer !== false) {
+    const mcp = registerMcp(detectAgent(), opts, me.name);
+    opts.onLine(
+      mcp.ok
+        ? 'your agent can now read the room (decisions, project memory)'
+        : `your agent cannot read the room yet: ${mcp.detail || 'mcp add failed'}`,
+    );
   }
 
   url = await findRoom();

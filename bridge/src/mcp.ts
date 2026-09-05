@@ -17,8 +17,17 @@ import {
  */
 
 export interface McpOptions {
-  /** http origin of the room server, e.g. http://localhost:8787 */
-  origin: string;
+  /**
+   * http origin of the room server, e.g. http://localhost:8787.
+   *
+   * Optional when `rendezvous` is set. A registered MCP server outlives many
+   * deploys, and the tunnel hostname changes on every one - so an origin baked
+   * in at registration time is wrong by the next morning, silently. Preferring
+   * the rendezvous makes the registration permanent.
+   */
+  origin?: string;
+  /** ask the rendezvous where the room is, instead of trusting a fixed origin */
+  rendezvous?: string;
   room: string;
   token: string;
   /** whose inbox room_inbox reads */
@@ -53,9 +62,29 @@ function when(ts: number): string {
 }
 
 export async function runMcpServer(opts: McpOptions): Promise<void> {
-  const base = opts.origin.replace(/\/$/, '');
+  let cachedBase = opts.origin ? opts.origin.replace(/\/$/, '') : '';
+
+  /**
+   * Where the room is, right now.
+   *
+   * Resolved through the rendezvous when one is configured, and re-resolved
+   * whenever a call fails - the tunnel rotates, and an MCP server registered
+   * last week must still work today without anyone re-running `mcp add`.
+   */
+  async function baseUrl(force = false): Promise<string> {
+    if (cachedBase && !force) return cachedBase;
+    if (opts.rendezvous) {
+      const { resolveLobby } = await import('./rendezvous.ts');
+      const lobby = await resolveLobby(opts.rendezvous, opts.room);
+      cachedBase = lobby.url.replace(/^ws/, 'http').replace(/\/ws$/, '');
+      return cachedBase;
+    }
+    if (!cachedBase) throw new Error('no room origin and no rendezvous configured');
+    return cachedBase;
+  }
 
   async function post<T>(path: string, body: unknown): Promise<T> {
+    const base = await baseUrl();
     const url = new URL(`${base}/api/room/${encodeURIComponent(opts.room)}/${path}`);
     url.searchParams.set('token', opts.token);
     const res = await fetch(url, {
@@ -71,16 +100,28 @@ export async function runMcpServer(opts: McpOptions): Promise<void> {
   }
 
   async function api<T>(path: string, params: Record<string, string> = {}): Promise<T> {
-    const url = new URL(`${base}/api/room/${encodeURIComponent(opts.room)}/${path}`);
-    url.searchParams.set('token', opts.token);
-    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    // Two attempts: the cached address, then a freshly resolved one. A room
+    // that moved since this process started should not need a restart.
+    for (const force of [false, true]) {
+      const base = await baseUrl(force);
+      const url = new URL(`${base}/api/room/${encodeURIComponent(opts.room)}/${path}`);
+      url.searchParams.set('token', opts.token);
+      for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
-    const res = await fetch(url);
-    if (!res.ok) {
-      const body = (await res.json().catch(() => ({}))) as { error?: string };
-      throw new Error(body.error ?? `room server returned ${res.status}`);
+      let res: Response;
+      try {
+        res = await fetch(url);
+      } catch (err) {
+        if (force || !opts.rendezvous) throw err;
+        continue; // the address may have moved; ask again
+      }
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `room server returned ${res.status}`);
+      }
+      return (await res.json()) as T;
     }
-    return (await res.json()) as T;
+    throw new Error('could not reach the room');
   }
 
   const server = new Server(
