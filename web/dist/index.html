@@ -50,6 +50,17 @@
   .dot.on { background: var(--prompt); }
   .dot.off { background: var(--danger); }
   .members { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .hbtn {
+    background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+    border-radius: 5px; padding: 3px 9px; font-size: 11px; cursor: pointer; white-space: nowrap;
+  }
+  .hbtn:hover { color: var(--text); border-color: var(--muted); }
+  .hbtn.on { color: var(--accent); border-color: var(--accent); }
+  /* Collapsed: the tabs stay visible so the counts are still readable. */
+  .decisions.collapsed #dec-list,
+  .decisions.collapsed #dec-empty,
+  .decisions.collapsed #mem-list,
+  .decisions.collapsed #mem-empty { display: none !important; }
   .pickup {
     margin: 8px 10px 0; padding: 9px 11px;
     background: var(--panel-2); border: 1px solid var(--line);
@@ -245,6 +256,8 @@
   <span class="dot off" id="conn"></span>
   <span style="color:var(--muted);font-size:11.5px" id="conn-text">offline</span>
   <div class="members" id="members"></div>
+  <button class="hbtn" id="toggle-tools" title="Tool calls are about half of all room traffic">tools off</button>
+  <button class="hbtn" id="leave-room" title="Disconnect this browser from the room">leave</button>
 </header>
 
 <main>
@@ -255,6 +268,7 @@
         <button class="tab" role="tab" id="tab-mem" aria-selected="false">Project memory<span class="n" id="mem-count"></span></button>
       </div>
       <button style="margin-left:auto;padding:3px 9px;font-size:11px" id="panel-add">pin a decision</button>
+      <button style="padding:3px 9px;font-size:11px" id="panel-toggle" title="Collapse this panel">hide</button>
     </div>
 
     <ul id="dec-list"></ul>
@@ -294,7 +308,12 @@
     members: [], events: [],
     memory: [],      // the standing picture of the project, not the feed
     tab: 'dec',      // which of the two top panels is showing
+    // Per-viewer preferences, through the store helper above so a private
+    // window (where localStorage throws) still loads.
+    showTools: store.get('showTools', '0') === '1',
+    panelOpen: store.get('panelOpen', '1') !== '0',
     ws: null, backoff: 500,
+    left: false,   // set by the leave button, so close does not reconnect
   };
 
   // ---------------------------------------------------------------- render
@@ -424,6 +443,11 @@
     const byMember = new Map();
     for (const e of state.events) {
       if (!KINDS[e.kind]) continue;
+      // Tool calls are about half of everything a room receives, and their
+      // summaries collapse to identical strings - fourteen "exec_command({"
+      // lines in a row read as the same message posted fourteen times. They
+      // are kept (agents read them for context) but hidden until asked for.
+      if (e.kind === 'tool' && !state.showTools) continue;
       if (!byMember.has(e.member)) byMember.set(e.member, []);
       byMember.get(e.member).push(e);
     }
@@ -446,10 +470,16 @@
       return;
     }
 
-    // remember which lanes were scrolled to the bottom, so new turns follow
-    const atBottom = new Map();
+    // Remember WHERE each lane was, not just whether it sat at the bottom.
+    // Every lane is destroyed below and a fresh element starts at scrollTop 0,
+    // so remembering only "was it pinned" made reading anything more than a
+    // screen back impossible: the next turn from anyone threw you to the top.
+    const scrollState = new Map();
     for (const body of lanes.querySelectorAll('.lane-body')) {
-      atBottom.set(body.dataset.member, body.scrollHeight - body.scrollTop - body.clientHeight < 40);
+      scrollState.set(body.dataset.member, {
+        top: body.scrollTop,
+        pinned: body.scrollHeight - body.scrollTop - body.clientHeight < 40,
+      });
     }
 
     lanes.replaceChildren();
@@ -500,12 +530,18 @@
     }
 
     for (const body of lanes.querySelectorAll('.lane-body')) {
-      if (atBottom.get(body.dataset.member) !== false) body.scrollTop = body.scrollHeight;
+      const was = scrollState.get(body.dataset.member);
+      // A lane you have never scrolled follows new turns. One you scrolled up
+      // in stays exactly where you left it, until you scroll back to the bottom.
+      if (!was || was.pinned) body.scrollTop = body.scrollHeight;
+      else body.scrollTop = was.top;
     }
   }
 
   function renderChat() {
     const chat = $('chat');
+    // Same rule as the lanes: keep the position, not just the pinned flag.
+    const prevTop = chat.scrollTop;
     const stick = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 40;
     chat.replaceChildren();
     for (const e of state.events) {
@@ -529,7 +565,7 @@
         chat.append(m);
       }
     }
-    if (stick) chat.scrollTop = chat.scrollHeight;
+    chat.scrollTop = stick ? chat.scrollHeight : prevTop;
   }
 
   function renderAll() {
@@ -605,6 +641,8 @@
     });
 
     ws.addEventListener('close', () => {
+      // A deliberate leave must not be undone by the reconnect loop.
+      if (state.left) return;
       setConn(false, 'reconnecting…');
       setTimeout(connect, state.backoff);
       state.backoff = Math.min(state.backoff * 2, 15000);
@@ -649,6 +687,44 @@
 
   $('tab-dec').addEventListener('click', function () { setTab('dec'); });
   $('tab-mem').addEventListener('click', function () { setTab('mem'); });
+
+  function paintTools() {
+    const b = $('toggle-tools');
+    b.textContent = state.showTools ? 'tools on' : 'tools off';
+    b.classList.toggle('on', state.showTools);
+  }
+  $('toggle-tools').addEventListener('click', function () {
+    state.showTools = !state.showTools;
+    store.set('showTools', state.showTools ? '1' : '0');
+    paintTools();
+    renderLanes();
+  });
+  paintTools();
+
+  function paintPanel() {
+    document.querySelector('.decisions').classList.toggle('collapsed', !state.panelOpen);
+    $('panel-toggle').textContent = state.panelOpen ? 'hide' : 'show';
+    $('panel-add').hidden = !state.panelOpen;
+  }
+  $('panel-toggle').addEventListener('click', function () {
+    state.panelOpen = !state.panelOpen;
+    store.set('panelOpen', state.panelOpen ? '1' : '0');
+    paintPanel();
+  });
+  paintPanel();
+
+  // Leaving is a browser-side action: it drops this viewer. The bridge in your
+  // terminal is a separate connection and keeps your agent in the room, which
+  // is the point - so say so rather than pretending the tab was the whole thing.
+  $('leave-room').addEventListener('click', function () {
+    if (!confirm('Leave the room?\n\nThis closes the page. Your bridge keeps running in its terminal, so your agent stays reachable — close that window too if you want out completely.')) return;
+    state.left = true;
+    try { state.ws && state.ws.close(); } catch (e) { /* already gone */ }
+    document.body.innerHTML =
+      '<div style="padding:40px;font:14px var(--sans);color:var(--muted)">' +
+      'You have left the room. <a href="" style="color:var(--accent)">rejoin</a>' +
+      '</div>';
+  });
 
   $('f-join').addEventListener('click', () => {
     state.me = $('f-name').value.trim();
