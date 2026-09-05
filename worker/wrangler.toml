@@ -1,0 +1,10 @@
+name = "atrium-lobby"
+main = "src/index.ts"
+compatibility_date = "2026-09-05"
+
+# Created with: npx wrangler kv namespace create LOBBIES
+# Paste the id wrangler prints below. It is not a secret - it only names the
+# store. The secret is PUBLISH_SECRET, set with `wrangler secret put`.
+[[kv_namespaces]]
+binding = "LOBBIES"
+id = "REPLACE_WITH_THE_ID_WRANGLER_PRINTS"
