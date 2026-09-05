@@ -1,25 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
-import { hostname, userInfo, homedir } from 'node:os';
+import { basename } from 'node:path';
+import { hostname, userInfo } from 'node:os';
 import { Bridge } from './bridge.ts';
-import { RoomClient } from './client.ts';
-import { AgentRunner, type AgentKind } from './runner.ts';
-import { openOffsets } from './offsets.ts';
-import { openPin } from './sessions.ts';
+import { joinRoom } from './join.ts';
+import { type AgentKind } from './runner.ts';
 import { discover, activeSources, claudeRoot, codexRoot, type Source } from './discover.ts';
 import { unknownShapes } from './parse/codex.ts';
+import { C, oneLine } from './term.ts';
 import type { Turn } from './types.ts';
 
-const C = {
-  dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
-  bold: (s: string) => `\x1b[1m${s}\x1b[0m`,
-  red: (s: string) => `\x1b[31m${s}\x1b[0m`,
-  green: (s: string) => `\x1b[32m${s}\x1b[0m`,
-  yellow: (s: string) => `\x1b[33m${s}\x1b[0m`,
-  blue: (s: string) => `\x1b[34m${s}\x1b[0m`,
-  magenta: (s: string) => `\x1b[35m${s}\x1b[0m`,
-  cyan: (s: string) => `\x1b[36m${s}\x1b[0m`,
-};
 
 const argv = process.argv.slice(2);
 const cmd = argv.find((a) => !a.startsWith('-')) ?? 'probe';
@@ -46,11 +35,6 @@ function ago(ms: number): string {
 
 function size(n: number): string {
   return n > 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
-}
-
-function oneLine(text: string, max = 160): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
 function printTurn(turn: Turn, source: Source): void {
@@ -172,10 +156,7 @@ function live(): void {
 // ----------------------------------------------------------------- join ----
 
 function join(): void {
-  const url = val('--url') ?? 'ws://localhost:8787/ws';
-  const room = val('--room') ?? 'atrium';
   const token = val('--token') ?? process.env.ATRIUM_TOKEN ?? '';
-  const name = val('--name') ?? (userInfo().username || hostname());
 
   if (!token) {
     console.error(C.red('\n  --token is required (or set ATRIUM_TOKEN).'));
@@ -183,193 +164,92 @@ function join(): void {
     process.exit(1);
   }
 
-  console.log(C.bold('\n  Atrium bridge'));
-  console.log(`  room    ${C.bold(room)}`);
-  console.log(`  as      ${C.bold(name)}`);
-  console.log(`  server  ${C.dim(url)}\n`);
-
-  const allowAsk = has('--allow-ask');
-  // mentions imply asking: a teammate driving your agent is strictly more than
-  // you driving it yourself, so the narrower permission comes along for free.
-  const allowMentions = has('--allow-mentions');
-  console.log(
-    `  asking  ${
-      allowAsk
-        ? C.yellow('ON — the room can run prompts through your agent')
-        : C.dim('off (--allow-ask lets the browser drive your agent)')
-    }`,
-  );
-  if (allowMentions) {
-    console.log(C.yellow('  mentions ON — a teammate @naming you starts a run on THIS machine'));
-  }
-
-  // Which conversation this room talks to. Persisted, so tomorrow's bridge
-  // reaches the same agent as today's.
-  const pins = openPin(room, name);
-  const pinned = pins.get();
-  const forcedSession = val('--session');
-
-  function resumeCommandFor(agent: AgentKind, sessionId: string): string {
-    return agent === 'claude' ? `claude --resume ${sessionId}` : `codex resume ${sessionId}`;
-  }
-
-  let status: 'connecting' | 'open' | 'closed' = 'connecting';
-  let runner: AgentRunner | null = null;
-  let bridgeRef: Bridge | null = null;
-
-  const client = new RoomClient({
-    url,
-    room,
+  const handle = joinRoom({
+    url: val('--url') ?? 'ws://localhost:8787/ws',
+    room: val('--room') ?? 'atrium',
     token,
-    name,
-    agent: 'mixed', // per-turn agent is what the UI actually displays
-    canAsk: allowAsk || allowMentions,
-    canMention: allowMentions,
-    resumeCommand: pinned ? resumeCommandFor(pinned.agent, pinned.sessionId) : undefined,
-    onRun: (from, text) => {
-      if (!allowAsk && !allowMentions) return;
-      // Built on first use: which CLI to drive and which folder to run in are
-      // learned from the transcripts, not guessed at startup.
-      if (!runner) {
-        const agent =
-          (val('--ask-agent') as AgentKind | undefined) ?? pinned?.agent ?? bridgeRef?.lastAgent ?? 'claude';
-        const cwd = val('--ask-cwd') ?? pinned?.cwd ?? bridgeRef?.lastCwd ?? process.cwd();
-        const sessionId = forcedSession ?? pinned?.sessionId;
-        console.log(C.dim(`\n  running asks through ${agent} in ${cwd}`));
-        console.log(
-          sessionId
-            ? C.dim(`  pinned session ${sessionId}`)
-            : C.yellow('  no pinned session yet — the first message will start one'),
-        );
-
-        // Claude Code keeps its saved memory per working directory. Running an
-        // ask from the home folder loads whatever personal memory lives there,
-        // and the answer goes to the whole room. Worth saying out loud once.
-        if (agent === 'claude' && resolve(cwd) === resolve(homedir())) {
-          console.log(
-            C.yellow('  ! this is your home folder, so your personal saved memory is in scope'),
-          );
-          console.log(
-            C.dim('    answers go to everyone. Use --ask-cwd <project folder> to avoid it.'),
-          );
-        }
-        runner = new AgentRunner({
-          agent,
-          cwd,
-          permissionMode: val('--ask-permission-mode') ?? 'auto',
-          fullAuto: has('--full-auto'),
-          sessionId,
-          room,
-          owner: name,
-          memberCount: () => client.memberCount,
-          codexLiveQueue: has('--codex-live-queue'),
-          onSessionCreated: (id) => {
-            pins.set({ agent, sessionId: id, cwd, pinnedAt: Date.now() });
-            console.log(C.green(`\n  ● this room is now pinned to session ${id}`));
-            console.log(C.dim(`    pick it up in a terminal with:  ${resumeCommandFor(agent, id)}`));
-          },
-          onBlocked: (why) => {
-            console.log(C.yellow(`  … ${why}`));
-            client.notice(why);
-          },
-          onNotice: (t) => {
-            console.log(C.yellow(`  ! agent run failed: ${t}`));
-            client.notice(`agent run failed: ${t}`);
-          },
-          onState: (busy) => {
-            if (busy) console.log(C.magenta(`\n  > ${from} asked your agent: `) + oneLine(text, 100));
-          },
-        });
-      }
-      runner.run(from, text);
-    },
-    onStatus: (s) => {
-      status = s;
-      if (s === 'open') console.log(C.green('  ● connected'));
-      if (s === 'closed') console.log(C.yellow('  ○ disconnected — queueing turns, will retry'));
-    },
-    onDeliver: (from, text) => {
-      console.log(`\n${C.magenta('  ✉ ')}${C.bold(from)} → your agent:  ${oneLine(text, 120)}`);
-      console.log(C.dim('    (waiting in room_inbox; your agent picks it up on its next read)\n'));
-    },
+    name: val('--name') ?? (userInfo().username || hostname()),
+    allowAsk: has('--allow-ask'),
+    allowMentions: has('--allow-mentions'),
+    askAgent: val('--ask-agent') as AgentKind | undefined,
+    askCwd: val('--ask-cwd'),
+    permissionMode: val('--ask-permission-mode'),
+    fullAuto: has('--full-auto'),
+    codexLiveQueue: has('--codex-live-queue'),
+    session: val('--session'),
+    catchUp: !has('--no-catch-up'),
+    thinking: has('--thinking'),
   });
-  client.connect();
-
-  // Resuming from where the last run stopped is what carries work you did with
-  // the bridge closed into the room, instead of losing it.
-  const offsets = has('--no-catch-up') ? null : openOffsets(room, name);
-
-  const bridge = new Bridge((turn) => client.send(turn), {
-    includeThinking: has('--thinking'),
-    resumeFrom: offsets ? (file) => offsets.get(file) : undefined,
-    onProgress: offsets ? (file, at) => offsets.set(file, at) : undefined,
-  });
-  bridgeRef = bridge;
-  bridge.onAttach = (s) => console.log(`${C.green('  + streaming ')}${s.agent}  ${C.dim(basename(s.file))}`);
-  bridge.start();
-
-  if (bridge.caughtUp.length > 0) {
-    const kb = Math.round(bridge.caughtUp.reduce((n, c) => n + c.bytes, 0) / 1024);
-    console.log(
-      C.cyan(`  ↺ catching up on ${kb} KB of work done while the bridge was closed`),
-    );
-  }
-
-  // `atrium pause` is not a daemon command yet; the local toggle is Ctrl+P here
-  if (process.stdin.isTTY) {
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.on('data', (buf) => {
-      const key = buf.toString();
-      if (key === '\u0003') shutdown(); // Ctrl+C
-      if (key === '\u0010') {
-        // Ctrl+P
-        if (bridge.isPaused) {
-          bridge.resume();
-          console.log(C.green('\n  ▶ resumed — turns are streaming again\n'));
-        } else {
-          bridge.pause();
-          console.log(C.yellow('\n  ⏸ paused — nothing leaves this machine until you press Ctrl+P again\n'));
-        }
-      }
-    });
-  }
-
-  const report = setInterval(() => {
-    bridge.reportProgress();
-    offsets?.save();
-    const b = bridge.stats;
-    const c = client.stats;
-    const dot = status === 'open' ? C.green('●') : C.yellow('○');
-    const paused = bridge.isPaused ? C.yellow(' [paused]') : '';
-    process.stderr.write(
-      C.dim(`\r  ${dot} ${bridge.watching.length} session(s) · ${c.sent} sent · ${c.queued} queued · ${b.redacted} redacted${paused}   `),
-    );
-  }, 2000);
 
   function shutdown(): void {
-    clearInterval(report);
-    bridge.stop();
-    offsets?.save();
-    runner?.dispose();
-    client.close();
-    console.log(C.bold(`\n\n  ${client.stats.sent} turns sent to ${room}.`));
-    console.log(C.dim(`  redacted ${bridge.stats.redacted} · kept private ${bridge.stats.private} · reconnects ${client.stats.reconnects}`));
-
-    // Whatever the room asked went into this conversation. A terminal that was
-    // already open never saw it, so hand over the command that picks it up.
-    const p = pins.get();
-    if (p) {
-      console.log(C.dim('\n  pick this room up in a terminal with:'));
-      console.log(`  ${C.bold(resumeCommandFor(p.agent, p.sessionId))}`);
-    }
-    console.log();
+    handle.stop();
     process.exit(0);
   }
 
   const seconds = Number(val('--seconds') ?? 0);
   if (seconds > 0) setTimeout(shutdown, seconds * 1000);
   process.on('SIGINT', shutdown);
+}
+
+// ------------------------------------------------------------------ app ----
+
+/**
+ * What "Join Atrium.cmd" runs.
+ *
+ * No url, no name, no flags - the whole point is that a teammate types nothing.
+ * The lobby and token are baked into the .cmd; the name is asked once and
+ * saved; the address is looked up, and looked up AGAIN if it stops working.
+ */
+async function app(): Promise<void> {
+  const lobby = val('--lobby') ?? 'echosphere';
+  const token = val('--token') ?? process.env.ATRIUM_TOKEN ?? '';
+  const rendezvous = val('--rendezvous') ?? process.env.ATRIUM_RENDEZVOUS ?? '';
+
+  console.log(C.bold('\n  Atrium'));
+
+  // These are launcher-configuration problems, not user errors. Whoever sees
+  // them has no terminal open and cannot fix it themselves, so say who can.
+  if (!token) {
+    console.error(C.red('\n  This launcher is missing the room token.'));
+    console.error(C.dim('  Ask Gourav for an updated "Join Atrium.cmd".\n'));
+    process.exit(1);
+  }
+  if (!rendezvous) {
+    console.error(C.red('\n  This launcher does not know where to look for the room.'));
+    console.error(C.dim('  Ask Gourav for an updated "Join Atrium.cmd".\n'));
+    process.exit(1);
+  }
+
+  const { startApp, openInBrowser } = await import('./app.ts');
+  const { createInterface } = await import('node:readline/promises');
+
+  let handle;
+  try {
+    handle = await startApp({
+      lobby,
+      token,
+      rendezvous,
+      ask: async (question) => {
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await rl.question(`  ${question}`);
+        rl.close();
+        return answer;
+      },
+      openBrowser: openInBrowser,
+      onLine: (text) => console.log(`  ${C.dim(text)}`),
+    });
+  } catch (err) {
+    console.error(C.red(`\n  Could not join: ${(err as Error).message}`));
+    console.error(C.dim('  If this keeps happening, ask Gourav whether the room is running.\n'));
+    process.exit(1);
+  }
+
+  console.log(C.dim('\n  Leave this window open. Close it when you are done.\n'));
+  process.on('SIGINT', () => {
+    handle.stop();
+    console.log(C.dim('\n  left the room\n'));
+    process.exit(0);
+  });
 }
 
 // ------------------------------------------------------------------------
@@ -387,6 +267,9 @@ switch (cmd) {
     break;
   case 'join':
     join();
+    break;
+  case 'app':
+    await app();
     break;
   case 'mcp': {
     // stdio belongs to the MCP protocol here, so nothing may be printed
