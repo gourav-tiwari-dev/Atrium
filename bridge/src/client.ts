@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import type { Turn } from './types.ts';
 
 /**
@@ -19,8 +18,12 @@ export interface ClientOptions {
   token: string;
   name: string;
   agent: string;
-  /** if set, mentions are injected into this Codex session via `codex queue` */
-  codexSession?: string;
+  /**
+   * What this person types to pick the room up in their own terminal. The
+   * server hands it back to the browser so the handoff banner can show the
+   * exact command instead of a vague instruction.
+   */
+  resumeCommand?: string;
   /** tell the server this bridge will run prompts typed in the browser */
   canAsk?: boolean;
   /** also let a teammate's @mention run this agent */
@@ -54,6 +57,11 @@ export class RoomClient {
   readonly stats = { sent: 0, queued: 0, reconnects: 0, delivered: 0 };
   /** mentions that arrived for us, newest last - the MCP room_inbox reads this */
   readonly inbox: Array<{ ts: number; from: string; text: string }> = [];
+  /**
+   * How many people are in the room. The lobby header tells the agent how many
+   * will see its reply, so it has to be the live count, not a guess.
+   */
+  memberCount = 1;
 
   private readonly opts: ClientOptions;
 
@@ -80,6 +88,7 @@ export class RoomClient {
           role: 'bridge',
           canAsk: this.opts.canAsk === true,
           canMention: this.opts.canMention === true,
+          resumeCommand: this.opts.resumeCommand,
         }),
       );
       this.opts.onStatus?.('open');
@@ -87,17 +96,18 @@ export class RoomClient {
     });
 
     ws.addEventListener('message', (e) => {
-      let msg: { t: string; from?: string; text?: string; message?: string };
+      let msg: { t: string; from?: string; text?: string; message?: string; members?: unknown[] };
       try {
         msg = JSON.parse(String(e.data));
       } catch {
         return;
       }
+      // welcome and presence both carry the roster; either refreshes the count
+      if (Array.isArray(msg.members)) this.memberCount = msg.members.length;
       if (msg.t === 'deliver' && msg.from && msg.text) {
         this.inbox.push({ ts: Date.now(), from: msg.from, text: msg.text });
         this.stats.delivered++;
         this.opts.onDeliver?.(msg.from, msg.text);
-        this.tryCodexInject(msg.from, msg.text);
       }
       if (msg.t === 'run' && typeof msg.text === 'string') {
         this.opts.onRun?.(msg.from ?? 'someone', msg.text);
@@ -160,23 +170,6 @@ export class RoomClient {
       this.stats.sent++;
     }
     this.stats.queued = this.queue.length;
-  }
-
-  /**
-   * Codex can take a message into a running session; Claude Code cannot.
-   * When it is not possible the mention still sits in room_inbox, which the
-   * agent reads through MCP - so nothing is lost either way.
-   */
-  private tryCodexInject(from: string, text: string): void {
-    if (this.opts.agent !== 'codex' || !this.opts.codexSession) return;
-    const child = spawn(
-      'codex',
-      ['queue', '--session', this.opts.codexSession, `[atrium] ${from}: ${text}`],
-      { stdio: 'ignore', shell: true },
-    );
-    child.on('error', () => {
-      /* codex not on PATH: the inbox is the fallback, nothing to do */
-    });
   }
 
   close(): void {

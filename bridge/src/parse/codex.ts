@@ -18,9 +18,17 @@ import type { Turn, ParseContext } from '../types.ts';
  * one for one (10 and 10 in the sample file). Consuming both puts every Codex
  * answer on screen twice. So: response_item only, event_msg never.
  *
- * Two more real-data quirks:
+ * Verified against Codex Desktop rollouts too (originator "Codex desktop",
+ * source "vscode") on a teammate's machine, 2026-09-05: same record types, no
+ * unclassified shapes, no doubled answers. That compatibility is empirical -
+ * OpenAI does not document this format - so `unknownShapes` below is what
+ * catches a future drift.
+ *
+ * Three more real-data quirks:
  *  - the first user message is an injected <environment_context> blob, not
  *    something a human typed
+ *  - Codex Desktop injects <recommended_plugins> as its own user record, which
+ *    posts as a junk prompt in the room until cleanPrompt strips it
  *  - reasoning carries `encrypted_content` and an empty `summary`, so there is
  *    usually nothing readable to show even when thinking is enabled
  */
@@ -54,6 +62,9 @@ function cleanPrompt(raw: string): string {
     .replace(/<environment_context>[\s\S]*?<\/environment_context>/g, '')
     .replace(/<permissions instructions>[\s\S]*/g, '')
     .replace(/<user_instructions>[\s\S]*?<\/user_instructions>/g, '')
+    // Codex Desktop only. Paired form on purpose - a greedy match to end of
+    // string would silently eat a real prompt that mentioned the tag.
+    .replace(/<recommended_plugins>[\s\S]*?<\/recommended_plugins>/g, '')
     .trim();
 }
 

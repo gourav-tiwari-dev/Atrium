@@ -19,7 +19,26 @@ interface Conn {
   role: 'bridge' | 'viewer';
   canAsk: boolean;
   canMention: boolean;
+  /** what this person types to pick the room up in a terminal, from their bridge */
+  resumeCommand?: string;
   alive: boolean;
+}
+
+/**
+ * `${room}::${name}` -> room messages their session has that an open terminal
+ * has not seen. Reset when their bridge reconnects, because a reconnect means a
+ * fresh process read the transcript.
+ */
+const pickups = new Map<string, number>();
+
+function bumpPickup(room: string, name: string): void {
+  const k = `${room}::${name}`;
+  pickups.set(k, (pickups.get(k) ?? 0) + 1);
+}
+
+function pickupFor(room: string, c: Conn): { count: number; command: string } | undefined {
+  const n = pickups.get(`${room}::${c.name}`) ?? 0;
+  return n > 0 && c.resumeCommand ? { count: n, command: c.resumeCommand } : undefined;
 }
 
 /** room id -> live connections. Presence is derived from this, never stored. */
@@ -53,6 +72,7 @@ function members(room: string): Member[] {
         existing.agent = c.agent;
         existing.canAsk = c.canAsk;
         existing.canMention = c.canMention;
+        existing.pickup = pickupFor(room, c);
       }
       continue;
     }
@@ -64,6 +84,7 @@ function members(room: string): Member[] {
       canMention: c.canMention,
       online: true,
       lastSeen: Date.now(),
+      pickup: pickupFor(room, c),
     });
   }
   return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
@@ -97,8 +118,12 @@ function onHello(ws: WebSocket, msg: Extract<ClientMessage, { t: 'hello' }>): Co
     role: msg.role,
     canAsk: msg.role === 'bridge' && msg.canAsk === true,
     canMention: msg.role === 'bridge' && msg.canMention === true,
+    resumeCommand: msg.role === 'bridge' ? msg.resumeCommand : undefined,
     alive: true,
   };
+  // A bridge reconnecting means a fresh process read that transcript, so
+  // whatever the room added is now in front of them.
+  if (msg.role === 'bridge') pickups.delete(`${room}::${name}`);
   if (!rooms.has(room)) rooms.set(room, new Set());
   const set = rooms.get(room)!;
   set.add(conn);
@@ -203,7 +228,12 @@ function handleMessage(conn: Conn | null, ws: WebSocket, raw: string): Conn | nu
       const own = msg.target === conn.name;
       const willRun = bridges.filter((c) => (own ? c.canAsk : c.canMention));
 
-      for (const c of willRun) send(c.ws, { t: 'run', from: conn.name, text: msg.text });
+      for (const c of willRun) {
+        send(c.ws, { t: 'run', from: conn.name, text: msg.text });
+        bumpPickup(conn.room, c.name);
+      }
+      // the pickup count changed, so the banner needs the new roster
+      broadcast(conn.room, { t: 'presence', members: members(conn.room) });
       for (const c of bridges) send(c.ws, { t: 'deliver', from: conn.name, text: msg.text });
 
       // The old behaviour was to file it in room_inbox and say nothing, so a
@@ -274,7 +304,12 @@ function handleMessage(conn: Conn | null, ws: WebSocket, raw: string): Conn | nu
         return conn;
       }
 
-      for (const c of targets) send(c.ws, { t: 'run', from: conn.name, text: msg.text });
+      for (const c of targets) {
+        send(c.ws, { t: 'run', from: conn.name, text: msg.text });
+        bumpPickup(conn.room, c.name);
+      }
+      // the pickup count changed, so the banner needs the new roster
+      broadcast(conn.room, { t: 'presence', members: members(conn.room) });
       return conn;
     }
 

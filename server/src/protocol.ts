@@ -42,11 +42,18 @@ export interface Member {
   canMention: boolean;
   online: boolean;
   lastSeen: number;
+  /**
+   * Room messages that went into this person's session but that an already-open
+   * terminal will not have seen. A running agent process does not notice
+   * appends made behind its back - verified 2026-09-05 - so the handoff has to
+   * be explicit rather than assumed.
+   */
+  pickup?: { count: number; command: string };
 }
 
 /** browser or bridge -> server */
 export type ClientMessage =
-  | { t: 'hello'; room: string; token: string; name: string; agent?: string; role: 'bridge' | 'viewer'; canAsk?: boolean; canMention?: boolean }
+  | { t: 'hello'; room: string; token: string; name: string; agent?: string; role: 'bridge' | 'viewer'; canAsk?: boolean; canMention?: boolean; resumeCommand?: string }
   | { t: 'turn'; kind: 'prompt' | 'response' | 'tool' | 'thinking'; text: string; tool?: string; ts?: number; id?: string; agent?: string }
   | { t: 'chat'; text: string }
   | { t: 'decision'; text: string }

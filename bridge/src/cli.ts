@@ -5,6 +5,7 @@ import { Bridge } from './bridge.ts';
 import { RoomClient } from './client.ts';
 import { AgentRunner, type AgentKind } from './runner.ts';
 import { openOffsets } from './offsets.ts';
+import { openPin } from './sessions.ts';
 import { discover, activeSources, claudeRoot, codexRoot, type Source } from './discover.ts';
 import { unknownShapes } from './parse/codex.ts';
 import type { Turn } from './types.ts';
@@ -202,6 +203,16 @@ function join(): void {
     console.log(C.yellow('  mentions ON — a teammate @naming you starts a run on THIS machine'));
   }
 
+  // Which conversation this room talks to. Persisted, so tomorrow's bridge
+  // reaches the same agent as today's.
+  const pins = openPin(room, name);
+  const pinned = pins.get();
+  const forcedSession = val('--session');
+
+  function resumeCommandFor(agent: AgentKind, sessionId: string): string {
+    return agent === 'claude' ? `claude --resume ${sessionId}` : `codex resume ${sessionId}`;
+  }
+
   let status: 'connecting' | 'open' | 'closed' = 'connecting';
   let runner: AgentRunner | null = null;
   let bridgeRef: Bridge | null = null;
@@ -212,17 +223,24 @@ function join(): void {
     token,
     name,
     agent: 'mixed', // per-turn agent is what the UI actually displays
-    codexSession: val('--codex-session'),
     canAsk: allowAsk || allowMentions,
     canMention: allowMentions,
+    resumeCommand: pinned ? resumeCommandFor(pinned.agent, pinned.sessionId) : undefined,
     onRun: (from, text) => {
       if (!allowAsk && !allowMentions) return;
       // Built on first use: which CLI to drive and which folder to run in are
       // learned from the transcripts, not guessed at startup.
       if (!runner) {
-        const agent = (val('--ask-agent') as AgentKind | undefined) ?? bridgeRef?.lastAgent ?? 'claude';
-        const cwd = val('--ask-cwd') ?? bridgeRef?.lastCwd ?? process.cwd();
+        const agent =
+          (val('--ask-agent') as AgentKind | undefined) ?? pinned?.agent ?? bridgeRef?.lastAgent ?? 'claude';
+        const cwd = val('--ask-cwd') ?? pinned?.cwd ?? bridgeRef?.lastCwd ?? process.cwd();
+        const sessionId = forcedSession ?? pinned?.sessionId;
         console.log(C.dim(`\n  running asks through ${agent} in ${cwd}`));
+        console.log(
+          sessionId
+            ? C.dim(`  pinned session ${sessionId}`)
+            : C.yellow('  no pinned session yet — the first message will start one'),
+        );
 
         // Claude Code keeps its saved memory per working directory. Running an
         // ask from the home folder loads whatever personal memory lives there,
@@ -240,7 +258,20 @@ function join(): void {
           cwd,
           permissionMode: val('--ask-permission-mode') ?? 'auto',
           fullAuto: has('--full-auto'),
-          continueSession: !has('--fresh'),
+          sessionId,
+          room,
+          owner: name,
+          memberCount: () => client.memberCount,
+          codexLiveQueue: has('--codex-live-queue'),
+          onSessionCreated: (id) => {
+            pins.set({ agent, sessionId: id, cwd, pinnedAt: Date.now() });
+            console.log(C.green(`\n  ● this room is now pinned to session ${id}`));
+            console.log(C.dim(`    pick it up in a terminal with:  ${resumeCommandFor(agent, id)}`));
+          },
+          onBlocked: (why) => {
+            console.log(C.yellow(`  … ${why}`));
+            client.notice(why);
+          },
           onNotice: (t) => {
             console.log(C.yellow(`  ! agent run failed: ${t}`));
             client.notice(`agent run failed: ${t}`);
@@ -250,7 +281,7 @@ function join(): void {
           },
         });
       }
-      runner.run(text);
+      runner.run(from, text);
     },
     onStatus: (s) => {
       status = s;
@@ -323,7 +354,16 @@ function join(): void {
     runner?.dispose();
     client.close();
     console.log(C.bold(`\n\n  ${client.stats.sent} turns sent to ${room}.`));
-    console.log(C.dim(`  redacted ${bridge.stats.redacted} · kept private ${bridge.stats.private} · reconnects ${client.stats.reconnects}\n`));
+    console.log(C.dim(`  redacted ${bridge.stats.redacted} · kept private ${bridge.stats.private} · reconnects ${client.stats.reconnects}`));
+
+    // Whatever the room asked went into this conversation. A terminal that was
+    // already open never saw it, so hand over the command that picks it up.
+    const p = pins.get();
+    if (p) {
+      console.log(C.dim('\n  pick this room up in a terminal with:'));
+      console.log(`  ${C.bold(resumeCommandFor(p.agent, p.sessionId))}`);
+    }
+    console.log();
     process.exit(0);
   }
 
@@ -377,7 +417,13 @@ switch (cmd) {
           --seconds N         stop after N seconds
           --no-catch-up       ignore work done while the bridge was closed
           --allow-mentions    let a teammate's @you run your agent (implies --allow-ask)
-          --codex-session S   deliver mentions into a running Codex session
+          --session <uuid>    pin a specific conversation instead of the saved one
+          --codex-live-queue  codex: deliver into the running app session
+
+  The room talks to ONE pinned conversation per person, saved in
+  ~/.atrium/session.json. If you have never started one, the first message from
+  the room creates it - you never have to open a CLI first. Afterwards,
+  'claude --resume <id>' in a terminal picks up everything the room did.
 
   While joined, Ctrl+P pauses streaming - nothing leaves the machine until you
   press it again. A prompt containing #private is never sent.
