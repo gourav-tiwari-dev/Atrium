@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
 /**
@@ -72,4 +73,44 @@ export function cliCommand(name: string): Launch {
   }
   cache.set(name, resolved);
   return resolved;
+}
+
+const installed = new Map<string, boolean>();
+
+/**
+ * Is this CLI actually usable on this machine?
+ *
+ * Needed because the agent used to default to "claude" whenever it could not
+ * tell - which on a teammate's Codex-only Mac produced "claude is not on PATH"
+ * for every question anyone asked them. Guessing the wrong vendor is worse than
+ * asking the machine.
+ */
+export function hasCli(name: string): boolean {
+  const hit = installed.get(name);
+  if (hit !== undefined) return hit;
+
+  const { cmd, prefix } = cliCommand(name);
+  let ok = false;
+  try {
+    const r = spawnSync(cmd, [...prefix, '--version'], {
+      timeout: 20_000,
+      shell: false,
+      stdio: 'ignore',
+    });
+    ok = !r.error && r.status === 0;
+  } catch {
+    ok = false;
+  }
+  installed.set(name, ok);
+  return ok;
+}
+
+/**
+ * Which agent CLI to drive when nothing else has said. Prefers whatever is
+ * actually installed; falls back to claude only so the failure names something.
+ */
+export function detectAgent(): 'claude' | 'codex' {
+  if (hasCli('claude')) return 'claude';
+  if (hasCli('codex')) return 'codex';
+  return 'claude';
 }

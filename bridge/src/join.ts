@@ -6,6 +6,7 @@ import { AgentRunner, type AgentKind } from './runner.ts';
 import { openOffsets } from './offsets.ts';
 import { openPin } from './sessions.ts';
 import { C, oneLine } from './term.ts';
+import { detectAgent, hasCli } from './launch.ts';
 
 /**
  * Joining a room: tail this machine's agent sessions, stream them to the room,
@@ -100,7 +101,11 @@ export function joinRoom(cfg: JoinConfig): JoinHandle {
       // Built on first use: which CLI to drive and which folder to run in are
       // learned from the transcripts, not guessed at startup.
       if (!runner) {
-        const agent = cfg.askAgent ?? pinned?.agent ?? bridgeRef?.lastAgent ?? 'claude';
+        // Ask the machine rather than assuming. Defaulting to claude meant a
+        // Codex-only teammate got "claude is not on PATH" for every question
+        // anyone asked them - the agent was never reachable, and the message
+        // named the wrong tool.
+        const agent = cfg.askAgent ?? pinned?.agent ?? bridgeRef?.lastAgent ?? detectAgent();
         const cwd = cfg.askCwd ?? pinned?.cwd ?? bridgeRef?.lastCwd ?? process.cwd();
         const sessionId = cfg.session ?? pinned?.sessionId;
 
@@ -110,6 +115,16 @@ export function joinRoom(cfg: JoinConfig): JoinHandle {
             ? C.dim(`  pinned session ${sessionId}`)
             : C.yellow('  no pinned session yet — the first message will start one'),
         );
+        // Say this once, at setup, rather than once per question as a failure.
+        if (!hasCli(agent)) {
+          const other = agent === 'claude' ? 'codex' : 'claude';
+          const advice = hasCli(other)
+            ? `${agent} is not installed here, but ${other} is — restart with --ask-agent ${other}`
+            : 'neither claude nor codex is installed here, so nobody can ask this agent anything';
+          say(C.yellow(`  ! ${advice}`));
+          client.notice(advice);
+        }
+
         if (agent === 'claude' && resolve(cwd) === resolve(homedir())) {
           say(C.dim('  note: home folder, so your saved memory is in scope; answers go to the room'));
         }
